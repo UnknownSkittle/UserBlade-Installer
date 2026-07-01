@@ -27,8 +27,12 @@ UserBlade transforms a minimal BlackArch install into a polished, modern desktop
 Download and run the installer:
 bash
 
+
+
 > wget https://raw.githubusercontent.com/UnknownSkittle/UserBlade-Installer/refs/heads/main/userblade.sh
+
 > chmod +x userblade.sh
+
 > sudo ./userblade.sh
 
     Note:  
