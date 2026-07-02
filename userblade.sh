@@ -296,13 +296,14 @@ chown -R "$USER":"$USER" "$USER_HOME/.config" "$USER_HOME/.local"
 # Plasma 6 Panel Layout (Top bar + Right sidebar)
 log "Creating Plasma 6 layout: Top panel + Right sidebar..."
 
+LAYOUT_TEMPLATE_DIR="$USER_HOME/.local/share/plasma/layout-templates"
 LAYOUT_DIR="$USER_HOME/.local/share/plasma/plasmashell/layouts"
-sudo -u "$USER" mkdir -p "$LAYOUT_DIR"
+sudo -u "$USER" mkdir -p "$LAYOUT_TEMPLATE_DIR" "$LAYOUT_DIR"
 
-# Create Plasma 6 layout configuration file
-cat <<'LAYOUT_EOF' | sudo -u "$USER" tee "$LAYOUT_DIR/userblade.layout" >/dev/null
+# Create a layout template that Plasma 6 can apply directly
+cat <<'LAYOUT_EOF' | sudo -u "$USER" tee "$LAYOUT_TEMPLATE_DIR/userblade.layout.lay" >/dev/null
 [Desktop]
-ToolBoxButtonState=bottom
+LayoutJS=org.kde.plasma.desktop-layout.js
 
 [Containments][1]
 plugin=org.kde.plasma.desktop
@@ -310,46 +311,39 @@ location=0
 wallpaperplugin=org.kde.image
 
 [Containments][1][Wallpaper][org.kde.image][General]
-Image=file://HOME/Pictures/userblade_wallpaper.jpg
+Image=file://$USER_HOME/Pictures/userblade_wallpaper.jpg
 
 [Containments][2]
 plugin=org.kde.plasma.panel
-location=top
-config_top_panel=true
+location=1
 
 [Containments][2][Applets][1]
 plugin=org.kde.plasma.kickoff
 
 [Containments][2][Applets][2]
 plugin=org.kde.plasma.taskmanager
-config_taskmanager=true
 
 [Containments][2][Applets][3]
 plugin=org.kde.plasma.systemtray
 
 [Containments][2][Applets][4]
 plugin=org.kde.plasma.digitalclock
-config_clock_showSeconds=true
-config_clock_showDate=true
-config_clock_timeFormat=24h
 
 [Containments][3]
 plugin=org.kde.plasma.panel
-location=right
-config_right_panel=true
+location=3
 
 [Containments][3][Applets][1]
 plugin=org.kde.plasma.taskmanager
-config_taskmanager_grouping=1
 
 [Containments][3][Applets][2]
 plugin=org.kde.plasma.systemtray
 LAYOUT_EOF
 
-# Update paths in layout files
-sudo -u "$USER" sed -i "s|//HOME|file://$USER_HOME|g" "$LAYOUT_DIR/userblade.layout"
+# Keep the layout file pointing at the real wallpaper path
+sudo -u "$USER" sed -i "s|^Image=.*$|Image=file://$USER_HOME/Pictures/userblade_wallpaper.jpg|" "$LAYOUT_TEMPLATE_DIR/userblade.layout.lay"
 
-chown -R "$USER":"$USER" "$LAYOUT_DIR"
+chown -R "$USER":"$USER" "$LAYOUT_TEMPLATE_DIR" "$LAYOUT_DIR"
 
 # KDE Plasma RC configuration for Plasma 6
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/plasmarc" >/dev/null
@@ -385,67 +379,93 @@ sudo -u "$USER" mkdir -p "$USER_HOME/.local/bin" "$USER_HOME/.config/autostart"
 # Main application script
 cat <<'EOF' | sudo -u "$USER" tee "$USER_HOME/.local/bin/userblade-apply-layout.sh" >/dev/null
 #!/bin/bash
+set -e
 
-export DISPLAY=:0
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
-
-sleep 3  # Wait for Plasma to fully load
+export XDG_CURRENT_DESKTOP=KDE
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 HOME_DIR="$HOME"
 WALLPAPER="$HOME_DIR/Pictures/userblade_wallpaper.jpg"
+LAYOUT="$HOME_DIR/.local/share/plasma/layout-templates/userblade.layout.lay"
+MARKER="$HOME_DIR/.local/share/userblade-layout-applied"
+
+mkdir -p "$HOME_DIR/.local/share"
 
 log() {
   echo "[UserBlade Layout] $*" | tee -a "$HOME_DIR/.local/share/userblade.log"
 }
 
+if [ -f "$MARKER" ]; then
+  log "Already applied once; exiting."
+  exit 0
+fi
+
 log "Starting layout application..."
+sleep 5
 
-# 1. Apply wallpaper via DBus (Plasma 6 compatible)
-if command -v qdbus-qt6 >/dev/null 2>&1; then
-  QDBUS="qdbus-qt6"
-elif command -v qdbus >/dev/null 2>&1; then
-  QDBUS="qdbus"
-else
-  QDBUS=""
+# 1. Apply wallpaper with the supported Plasma 6 tool when present
+if [ -f "$WALLPAPER" ]; then
+  if command -v plasma-apply-wallpaperimage >/dev/null 2>&1; then
+    log "Applying wallpaper with plasma-apply-wallpaperimage"
+    plasma-apply-wallpaperimage "$WALLPAPER" 2>/dev/null || true
+  fi
+
+  if command -v qdbus-qt6 >/dev/null 2>&1; then
+    QDBUS="qdbus-qt6"
+  elif command -v qdbus >/dev/null 2>&1; then
+    QDBUS="qdbus"
+  else
+    QDBUS=""
+  fi
+
+  if [ -n "$QDBUS" ]; then
+    log "Applying wallpaper via DBus fallback"
+    "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
+      var allDesktops = desktops();
+      for (var i=0; i<allDesktops.length; i++) {
+        d = allDesktops[i];
+        d.wallpaperPlugin = 'org.kde.image';
+        d.currentConfigGroup = Array('Wallpaper', 'org.kde.image', 'General');
+        d.writeConfig('Image', 'file://$HOME_DIR/Pictures/userblade_wallpaper.jpg');
+      }
+    " 2>/dev/null || true
+  fi
 fi
 
-if [ -n "$QDBUS" ] && [ -f "$WALLPAPER" ]; then
-  log "Applying wallpaper..."
-  $QDBUS org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
-    var allDesktops = desktops();
-    for (var i=0; i<allDesktops.length; i++) {
-      d = allDesktops[i];
-      d.wallpaperPlugin = 'org.kde.image';
-      d.currentConfigGroup = Array('Wallpaper', 'org.kde.image', 'General');
-      d.writeConfig('Image', 'file://$HOME_DIR/Pictures/userblade_wallpaper.jpg');
-    }
-  " 2>/dev/null || log "Wallpaper DBus call failed, trying alternative..."
-fi
-
-# 2. Apply icon theme
+# 2. Apply color/icon theme with Plasma 6 tools
 if command -v kwriteconfig6 >/dev/null 2>&1; then
-  log "Applying icon theme..."
-  kwriteconfig6 --file "$HOME_DIR/.config/kdeglobals" --group Icons --key Theme Papirus-Dark
-  kwriteconfig6 --file "$HOME_DIR/.config/kdeglobals" --group General --key ColorScheme BreezeDark
+  log "Applying theme settings"
+  kwriteconfig6 --file "$HOME_DIR/.config/kdeglobals" --group Icons --key Theme Papirus-Dark 2>/dev/null || true
+  kwriteconfig6 --file "$HOME_DIR/.config/kdeglobals" --group General --key ColorScheme BreezeDark 2>/dev/null || true
 fi
 
-# 3. Rebuild icon cache (fixes missing app icons)
-log "Rebuilding icon caches..."
+if command -v lookandfeeltool >/dev/null 2>&1; then
+  log "Applying look-and-feel"
+  lookandfeeltool -a org.kde.breezedark.desktop 2>/dev/null || true
+fi
+
+# 3. Apply the layout template if the tool exists
+if command -v plasma-apply-layout >/dev/null 2>&1 && [ -f "$LAYOUT" ]; then
+  log "Applying Plasma layout template"
+  plasma-apply-layout "$LAYOUT" 2>/dev/null || true
+fi
+
+# 4. Rebuild icon cache and refresh GTK theme
+log "Rebuilding icon caches"
 gtk-update-icon-cache -f -t "$HOME_DIR/.local/share/icons" 2>/dev/null || true
 gtk-update-icon-cache -f -t "/usr/share/icons/hicolor" 2>/dev/null || true
-
-# 4. Apply GTK theme
 export GTK_THEME=Arc-Dark:dark
 
-# 5. Signal Plasma to reload
+# 5. Reload Plasma shell
 if command -v kquitapp6 >/dev/null 2>&1; then
-  log "Reloading Plasma configuration..."
+  log "Reloading Plasma shell"
   kquitapp6 plasmashell 2>/dev/null || true
   sleep 2
-  /usr/bin/plasmashell &
+  /usr/bin/plasmashell >/dev/null 2>&1 &
 fi
 
-log "Layout application complete!"
+touch "$MARKER"
+log "Layout application complete"
 EOF
 
 sudo -u "$USER" chmod +x "$USER_HOME/.local/bin/userblade-apply-layout.sh"
@@ -454,16 +474,38 @@ sudo -u "$USER" chmod +x "$USER_HOME/.local/bin/userblade-apply-layout.sh"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart/userblade-apply-layout.desktop" >/dev/null
 [Desktop Entry]
 Type=Application
-Exec=$HOME/.local/bin/userblade-apply-layout.sh
+Exec=$USER_HOME/.local/bin/userblade-apply-layout.sh
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
+X-KDE-autostart-phase=2
+X-KDE-StartupNotify=false
 Name=UserBlade Layout Initializer
 Comment=Apply UserBlade layout, wallpaper, and theme
 StartupNotify=false
+Terminal=false
+OnlyShowIn=KDE;
 EOF
 
 chown -R "$USER":"$USER" "$USER_HOME/.local/bin/userblade-apply-layout.sh" "$USER_HOME/.config/autostart"
+
+# Fallback service so the style/layout hook runs reliably after login
+mkdir -p "$USER_HOME/.config/systemd/user"
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/systemd/user/userblade-apply-layout.service" >/dev/null
+[Unit]
+Description=UserBlade layout and theme application
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=$USER_HOME/.local/bin/userblade-apply-layout.sh
+
+[Install]
+WantedBy=default.target
+EOF
+
+sudo -u "$USER" systemctl --user daemon-reload 2>/dev/null || true
+sudo -u "$USER" systemctl --user enable userblade-apply-layout.service 2>/dev/null || true
 
 # Rebuild icon caches now
 log "Rebuilding icon caches..."
