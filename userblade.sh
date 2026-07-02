@@ -1,15 +1,11 @@
 #!/bin/bash
 set -e
 
-# -----------------------------
-#  USER + ROOT CHECK
-# -----------------------------
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run this script with sudo: sudo ./userblade.sh"
   exit 1
 fi
 
-# Detect main non-root user
 if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
   USER="$SUDO_USER"
 else
@@ -17,75 +13,42 @@ else
 fi
 
 if [ -z "$USER" ]; then
-  echo "Could not detect a non-root user. Create one first."
+  echo "Could not detect a non-root user."
   exit 1
 fi
 
 USER_HOME=$(eval echo "~$USER")
-echo "[UserBlade] Target user: $USER ($USER_HOME)"
 
-# -----------------------------
-#  DISK SPACE WARNING
-# -----------------------------
 FREE_KB=$(df --output=avail / | tail -n1)
 FREE_GB=$((FREE_KB / 1024 / 1024))
 
 echo "[UserBlade] Free space: ${FREE_GB}GB"
-echo "[UserBlade] This install uses ~15–20GB. Ctrl+C to abort."
-sleep 5
+sleep 3
 
-# -----------------------------
-#  SYSTEM UPDATE
-# -----------------------------
 pacman -Syu --noconfirm
-
-# -----------------------------
-#  CORE UTILITIES
-# -----------------------------
 pacman -S --noconfirm wget pciutils xdg-user-dirs
 sudo -u "$USER" xdg-user-dirs-update || true
 
-# -----------------------------
-#  KDE PLASMA CORE
-# -----------------------------
 pacman -S --noconfirm \
-  plasma-desktop \
-  plasma-workspace \
-  plasma-workspace-wallpapers \
-  plasma-systemmonitor \
-  konsole \
-  dolphin \
-  systemsettings \
-  sddm sddm-kcm \
-  xdg-desktop-portal-kde
+  plasma-desktop plasma-workspace plasma-workspace-wallpapers plasma-systemmonitor \
+  konsole dolphin systemsettings sddm sddm-kcm xdg-desktop-portal-kde
 
 systemctl enable sddm
 
-# -----------------------------
-#  FLATPAK + FLATHUB
-# -----------------------------
 pacman -S --noconfirm flatpak gvfs gvfs-mtp gvfs-gphoto2 gvfs-afc gvfs-smb
 sudo -u "$USER" flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || true
 
-# -----------------------------
-#  WALLPAPER + ICON
-# -----------------------------
 mkdir -p "$USER_HOME/Pictures" "$USER_HOME/Icons"
-sudo -u "$USER" wget -O "$USER_HOME/Pictures/userblade_wallpaper.jpg" "https://iili.io/C7P8pCg.jpg" || true
-sudo -u "$USER" wget -O "$USER_HOME/Icons/userblade_icon.png" "https://iili.io/C7ikyhX.png" || true
+sudo -u "$USER" wget -O "$USER_HOME/Pictures/userblade_wallpaper.jpg" "https://iili.io/C7P8pCg.jpg"
+sudo -u "$USER" wget -O "$USER_HOME/Icons/userblade_icon.png" "https://iili.io/C7ikyhX.png"
 
-echo "UserBlade (BlackArch-based)" > /etc/issue
 echo "UserBlade" > /etc/userblade-name
 
-# -----------------------------
-#  MULTILIB FOR STEAM
-# -----------------------------
 if ! grep -E '^
 
 \[multilib\]
 
-' /etc/pacman.conf >/dev/null 2>&1; then
-  echo "[UserBlade] Enabling multilib..."
+' /etc/pacman.conf >/dev/null; then
   cat <<'EOF' >> /etc/pacman.conf
 
 [multilib]
@@ -94,14 +57,115 @@ EOF
   pacman -Syu --noconfirm
 fi
 
-# -----------------------------
-#  YAY INSTALLATION
-# -----------------------------
 pacman -S --noconfirm base-devel git
 
-YAY_DIR="$USER_HOME/yay"
-if [ -d "$YAY_DIR" ]; then
-  OWNER=$(stat -c "%U" "$YAY_DIR")
+if ! command -v yay >/dev/null; then
+  cd "$USER_HOME"
+  sudo -u "$USER" git clone https://aur.archlinux.org/yay.git
+  cd yay
+  sudo -u "$USER" makepkg -si --noconfirm
+fi
+
+sudo -u "$USER" yay -S --noconfirm bauh kvantum-theme-arc arc-kde papirus-icon-theme qt5ct qt6ct
+
+mkdir -p "$USER_HOME/.config/Kvantum"
+echo "[General]
+theme=Arc-Dark" | sudo -u "$USER" tee "$USER_HOME/.config/Kvantum/kvantum.kvconfig"
+
+pacman -S --noconfirm linux-firmware mesa
+
+GPU_INFO=$(lspci | grep -i 'vga\|3d\|display')
+if echo "$GPU_INFO" | grep -qi amd; then pacman -S --noconfirm xf86-video-amdgpu; fi
+if echo "$GPU_INFO" | grep -qi intel; then pacman -S --noconfirm xf86-video-intel; fi
+
+pacman -S --noconfirm jdk-openjdk python python-pip nodejs npm
+
+pacman -S --noconfirm steam obs-studio krita firefox vlc gimp qbittorrent thunderbird cpu-x git ghex
+
+sudo -u "$USER" yay -S --noconfirm onlyoffice-bin bottles discord whatsie visual-studio-code-bin opentabletdriver
+
+pacman -S --noconfirm pipewire pipewire-alsa pipewire-pulse pipewire-jack wireplumber pavucontrol-qt easyeffects helvum
+
+pacman -S --noconfirm kaccess kmag kmousetool
+
+LAYOUT_DIR="$USER_HOME/.local/share/plasma/layout-templates"
+mkdir -p "$LAYOUT_DIR"
+
+cat <<EOF | sudo -u "$USER" tee "$LAYOUT_DIR/userblade.layout.lay"
+[Desktop]
+LayoutJS=org.kde.plasma.desktop-layout.js
+
+[Containments][1]
+plugin=org.kde.plasma.desktop
+location=0
+formfactor=0
+wallpaperplugin=org.kde.image
+
+[Containments][1][Wallpaper][org.kde.image][General]
+Image=file://$USER_HOME/Pictures/userblade_wallpaper.jpg
+
+[Containments][2]
+plugin=org.kde.plasma.panel
+location=3
+formfactor=2
+
+[Containments][3]
+plugin=org.kde.plasma.panel
+location=1
+formfactor=2
+
+[Containments][3][Applets][1]
+plugin=org.kde.plasma.appmenu
+
+[Containments][3][Applets][2]
+plugin=org.kde.plasma.systemtray
+EOF
+
+AUTO_LAYOUT="$USER_HOME/.local/bin/userblade-apply-layout.sh"
+cat <<EOF | sudo -u "$USER" tee "$AUTO_LAYOUT"
+#!/bin/bash
+LAYOUT="\$HOME/.local/share/plasma/layout-templates/userblade.layout.lay"
+if command -v plasma-apply-layout >/dev/null; then
+    plasma-apply-layout "\$LAYOUT"
+fi
+EOF
+sudo -u "$USER" chmod +x "$AUTO_LAYOUT"
+
+mkdir -p "$USER_HOME/.config/autostart"
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart/userblade-apply-layout.desktop"
+[Desktop Entry]
+Type=Application
+Exec=$USER_HOME/.local/bin/userblade-apply-layout.sh
+Name=UserBlade Layout
+EOF
+
+echo "1.0.0" > /etc/userblade-version
+
+UPDATE_SCRIPT="$USER_HOME/.local/bin/update.sh"
+sudo -u "$USER" wget -O "$UPDATE_SCRIPT" "https://raw.githubusercontent.com/UnknownSkittle/UserBlade-Installer/main/update.sh"
+sudo -u "$USER" chmod +x "$UPDATE_SCRIPT"
+
+CHECKER="$USER_HOME/.local/bin/userblade-check-updates.sh"
+cat <<EOF | sudo -u "$USER" tee "$CHECKER"
+#!/bin/bash
+LOCAL_VERSION=\$(cat /etc/userblade-version)
+REMOTE_VERSION=\$(curl -s https://raw.githubusercontent.com/UnknownSkittle/UserBlade-Installer/main/version.txt)
+if [ "\$LOCAL_VERSION" != "\$REMOTE_VERSION" ]; then
+    notify-send "UserBlade Update Available" "New version: \$REMOTE_VERSION (installed: \$LOCAL_VERSION)"
+fi
+EOF
+sudo -u "$USER" chmod +x "$CHECKER"
+
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart/userblade-update-check.desktop"
+[Desktop Entry]
+Type=Application
+Exec=$USER_HOME/.local/bin/userblade-check-updates.sh
+Name=UserBlade Update Checker
+EOF
+
+chown -R "$USER":"$USER" "$USER_HOME"
+
+echo "[UserBlade] Installation complete."
   if [ "$OWNER" != "$USER" ]; then
     chown -R "$USER":"$USER" "$YAY_DIR"
   fi
