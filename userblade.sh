@@ -457,10 +457,9 @@ set -e
 export XDG_CURRENT_DESKTOP=KDE
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
-USER_NAME="$(id -un 2>/dev/null || true)"
-HOME_DIR="${HOME:-$(getent passwd "$USER_NAME" 2>/dev/null | cut -d: -f6 || true)}"
-if [ -z "$HOME_DIR" ]; then
-  HOME_DIR="/home/$USER_NAME"
+HOME_DIR="/home/$(id -un 2>/dev/null || echo "$USER")"
+if [ -z "$HOME_DIR" ] || [ "$HOME_DIR" = "/home/" ]; then
+  HOME_DIR="/home/$USER"
 fi
 export HOME="$HOME_DIR"
 
@@ -490,7 +489,7 @@ done
 
 mkdir -p "$HOME_DIR/.config"
 
-cat > "$HOME_DIR/.config/plasma-org.kde.plasma.desktop-appletsrc" <<EOF
+cat > "$HOME_DIR/.config/plasma-org.kde.plasma.desktop-appletsrc" <<'PLASMA_PANEL'
 [Containments][1]
 activityId=
 formfactor=2
@@ -522,7 +521,7 @@ plugin=org.kde.plasma.taskmanager
 
 [Containments][2][Applets][2]
 plugin=org.kde.plasma.systemtray
-EOF
+PLASMA_PANEL
 
 if command -v qdbus-qt6 >/dev/null 2>&1; then
   QDBUS="qdbus-qt6"
@@ -581,14 +580,12 @@ apply_theme() {
 apply_wallpaper
 apply_theme
 
-# 4. Rebuild icon cache and refresh GTK theme
 log "Rebuilding icon caches"
 gtk-update-icon-cache -f -t "$HOME_DIR/.local/share/icons" 2>/dev/null || true
 gtk-update-icon-cache -f -t "$HOME_DIR/.local/share/icons/UserBlade" 2>/dev/null || true
 gtk-update-icon-cache -f -t "/usr/share/icons/hicolor" 2>/dev/null || true
 export GTK_THEME=Arc-Dark:dark
 
-# 5. Reload Plasma shell
 if command -v kquitapp6 >/dev/null 2>&1; then
   log "Reloading Plasma shell"
   kquitapp6 plasmashell 2>/dev/null || true
