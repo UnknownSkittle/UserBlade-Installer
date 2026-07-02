@@ -1,6 +1,7 @@
 #!/bin/bash
 # ============================================================
-# UserBlade Unified Installer (Full Overwrite, Re-runnable)
+# UserBlade Unified Installer (Arc-Dark Plasma Edition)
+# Full Overwrite • Re-runnable • One Script
 # ============================================================
 
 set -e
@@ -156,7 +157,7 @@ systemctl disable lightdm gdm lxdm mdm slim 2>/dev/null || true
 pacman -Rns --noconfirm lightdm gdm lxdm mdm slim 2>/dev/null || true
 
 # ------------------------------------------------------------
-# Wallpaper + icon (your PNG + wallpaper)
+# Wallpaper + icon
 # ------------------------------------------------------------
 echo "[UserBlade] Downloading wallpaper + icon..."
 sudo -u "$USER" mkdir -p "$USER_HOME/Pictures" "$USER_HOME/Icons"
@@ -165,18 +166,21 @@ sudo -u "$USER" wget -O "$USER_HOME/Pictures/userblade_wallpaper.jpg" "https://i
 sudo -u "$USER" wget -O "$USER_HOME/Icons/userblade_icon.png" "https://iili.io/C7ikyhX.png"
 
 # ------------------------------------------------------------
-# Theme: Arc Dark + Papirus + Breeze Snow
+# Arc-Dark Plasma Theme (GTK + KDE + Kvantum)
 # ------------------------------------------------------------
-echo "[UserBlade] Installing theme components..."
-pacman -S --noconfirm arc-gtk-theme papirus-icon-theme breeze
+echo "[UserBlade] Installing Arc-Dark Plasma theme..."
 
-echo "[UserBlade] Applying KDE + GTK theme..."
+sudo -u "$USER" yay -S --noconfirm arc-gtk-theme-git
+
+pacman -S --noconfirm papirus-icon-theme breeze kvantum
+
 mkdir -p "$USER_HOME/.config"
 
+# KDE globals
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/kdeglobals" >/dev/null
 [General]
-ColorScheme=UserBlade
-widgetStyle=Arc-Dark
+ColorScheme=Arc-Dark-Plasma
+widgetStyle=kvantum
 
 [Icons]
 Theme=Papirus-Dark
@@ -185,8 +189,8 @@ Theme=Papirus-Dark
 Name=Breeze_Snow
 EOF
 
-mkdir -p "$USER_HOME/.config/gtk-3.0" "$USER_HOME/.config/gtk-4.0"
-
+# GTK3
+mkdir -p "$USER_HOME/.config/gtk-3.0"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/gtk-3.0/settings.ini" >/dev/null
 [Settings]
 gtk-theme-name=Arc-Dark
@@ -194,6 +198,8 @@ gtk-icon-theme-name=Papirus-Dark
 gtk-cursor-theme-name=Breeze_Snow
 EOF
 
+# GTK4
+mkdir -p "$USER_HOME/.config/gtk-4.0"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/gtk-4.0/settings.ini" >/dev/null
 [Settings]
 gtk-theme-name=Arc-Dark
@@ -201,8 +207,15 @@ gtk-icon-theme-name=Papirus-Dark
 gtk-cursor-theme-name=Breeze_Snow
 EOF
 
+# Kvantum Arc-Dark Plasma
+mkdir -p "$USER_HOME/.config/Kvantum"
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/Kvantum/kvantum.kvconfig" >/dev/null
+[General]
+theme=Arc-Dark-Plasma
+EOF
+
 # ------------------------------------------------------------
-# Plasma layout (right dock + top bar) + wallpaper
+# Plasma layout + wallpaper
 # ------------------------------------------------------------
 echo "[UserBlade] Creating Plasma layout template..."
 LAYOUT_DIR="$USER_HOME/.local/share/plasma/layout-templates"
@@ -236,7 +249,7 @@ plugin=org.kde.plasma.systemtray
 EOF
 
 # ------------------------------------------------------------
-# Autostart: force layout + wallpaper on login
+# Autostart: force layout + wallpaper
 # ------------------------------------------------------------
 echo "[UserBlade] Creating layout + wallpaper autostart..."
 mkdir -p "$USER_HOME/.local/bin" "$USER_HOME/.config/autostart"
@@ -276,7 +289,7 @@ Comment=Force apply UserBlade layout + wallpaper
 EOF
 
 # ------------------------------------------------------------
-# KSplash (KDE startup) using Breeze
+# KSplash
 # ------------------------------------------------------------
 echo "[UserBlade] Configuring KSplash..."
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/ksplashrc" >/dev/null
@@ -285,7 +298,7 @@ Theme=org.kde.breeze
 EOF
 
 # ------------------------------------------------------------
-# Plymouth (boot splash) with static logo (your PNG)
+# Plymouth boot splash
 # ------------------------------------------------------------
 echo "[UserBlade] Installing Plymouth..."
 pacman -S --noconfirm plymouth plymouth-theme-spinner
@@ -319,13 +332,11 @@ EOF
 
 plymouth-set-default-theme userblade
 
-echo "[UserBlade] Rebuilding initramfs for Plymouth..."
-if command -v mkinitcpio >/dev/null 2>&1; then
-  mkinitcpio -P
-fi
+echo "[UserBlade] Rebuilding initramfs..."
+mkinitcpio -P
 
 # ------------------------------------------------------------
-# Neofetch ASCII (BlackArch-style, purple, sword)
+# Neofetch ASCII
 # ------------------------------------------------------------
 echo "[UserBlade] Setting custom neofetch ASCII..."
 NEO_DIR="$USER_HOME/.config/neofetch"
@@ -380,6 +391,4 @@ echo "[UserBlade] Fixing ownership..."
 chown -R "$USER":"$USER" "$USER_HOME"
 
 echo "[UserBlade] Done."
-echo "[UserBlade] Reboot, log into KDE, and the autostart will force layout + wallpaper."
-echo "[UserBlade] Neofetch will show UserBlade + custom ASCII."
-echo "[UserBlade] Plymouth will show your PNG icon during boot."
+echo "[UserBlade] Reboot into KDE to activate Arc-Dark Plasma + full UserBlade layout."
