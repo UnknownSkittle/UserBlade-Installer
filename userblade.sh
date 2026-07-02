@@ -457,7 +457,13 @@ set -e
 export XDG_CURRENT_DESKTOP=KDE
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
-HOME_DIR="$HOME"
+USER_NAME="$(id -un 2>/dev/null || true)"
+HOME_DIR="${HOME:-$(getent passwd "$USER_NAME" 2>/dev/null | cut -d: -f6 || true)}"
+if [ -z "$HOME_DIR" ]; then
+  HOME_DIR="/home/$USER_NAME"
+fi
+export HOME="$HOME_DIR"
+
 WALLPAPER="$HOME_DIR/Pictures/userblade_wallpaper.jpg"
 LAYOUT="$HOME_DIR/.local/share/plasma/layout-templates/userblade.layout.lay"
 MARKER="$HOME_DIR/.local/share/userblade-layout-applied"
@@ -600,7 +606,7 @@ sudo -u "$USER" chmod +x "$USER_HOME/.local/bin/userblade-apply-layout.sh"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart/userblade-apply-layout.desktop" >/dev/null
 [Desktop Entry]
 Type=Application
-Exec=$USER_HOME/.local/bin/userblade-apply-layout.sh
+Exec=/bin/bash -lc '$USER_HOME/.local/bin/userblade-apply-layout.sh'
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
