@@ -1,8 +1,15 @@
 #!/bin/bash
 
-# --------------------------------
-# BASIC SAFETY + LOGGING
-# --------------------------------
+# ============================================================
+# UserBlade Installer (Arch / BlackArch) - KDE Plasma Takeover
+# - Replaces any existing DE with KDE Plasma
+# - Removes core DE components (safe clean)
+# - Auto-detects GPU (AMD/Intel/NVIDIA with fallback)
+# - Applies UserBlade theme once via full KDE config injection
+# - Switches to KDE on reboot (no black-screen lockouts)
+# - Logs everything to /var/log/userblade-installer.log
+# ============================================================
+
 LOG_FILE="/var/log/userblade-installer.log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
@@ -47,9 +54,26 @@ pacman -S --noconfirm wget curl pciutils xdg-user-dirs || echo "[UserBlade][WARN
 sudo -u "$USER" xdg-user-dirs-update || echo "[UserBlade][WARN] xdg-user-dirs-update failed, continuing..."
 
 # --------------------------------
-# KDE PLASMA CORE
+# ENABLE MULTILIB
 # --------------------------------
-echo "[UserBlade] Installing KDE Plasma core..."
+echo "[UserBlade] Ensuring multilib is enabled..."
+if ! grep -E '^
+
+\[multilib\]
+
+' /etc/pacman.conf >/dev/null 2>&1; then
+  cat <<'EOF' >> /etc/pacman.conf
+
+[multilib]
+Include = /etc/pacman.d/mirrorlist
+EOF
+  pacman -Syu --noconfirm || echo "[UserBlade][WARN] pacman -Syu after multilib failed, continuing..."
+fi
+
+# --------------------------------
+# KDE PLASMA CORE + SDDM
+# --------------------------------
+echo "[UserBlade] Installing KDE Plasma core + SDDM..."
 pacman -S --noconfirm \
   plasma-desktop \
   plasma-workspace \
@@ -80,23 +104,6 @@ echo "UserBlade (Arch/BlackArch-based)" > /etc/issue
 echo "UserBlade" > /etc/userblade-name
 
 # --------------------------------
-# MULTILIB FOR STEAM
-# --------------------------------
-echo "[UserBlade] Ensuring multilib is enabled..."
-if ! grep -E '^
-
-\[multilib\]
-
-' /etc/pacman.conf >/dev/null 2>&1; then
-  cat <<'EOF' >> /etc/pacman.conf
-
-[multilib]
-Include = /etc/pacman.d/mirrorlist
-EOF
-  pacman -Syu --noconfirm || echo "[UserBlade][WARN] pacman -Syu after multilib failed, continuing..."
-fi
-
-# --------------------------------
 # YAY (AUR HELPER)
 # --------------------------------
 echo "[UserBlade] Installing yay (AUR helper)..."
@@ -121,9 +128,9 @@ if ! command -v yay >/dev/null 2>&1; then
 fi
 
 # --------------------------------
-# THEMING + QT CONTROL
+# THEMING BASE (Arc, Papirus, Kvantum, qt5ct/qt6ct)
 # --------------------------------
-echo "[UserBlade] Installing theming (Kvantum, Arc, Papirus, qt5ct/qt6ct)..."
+echo "[UserBlade] Installing theming base..."
 sudo -u "$USER" yay -S --noconfirm kvantum-theme-arc arc-kde papirus-icon-theme qt5ct qt6ct || echo "[UserBlade][WARN] theming AUR packages failed."
 
 echo "[UserBlade] Configuring Kvantum..."
@@ -134,7 +141,7 @@ theme=Arc-Dark
 EOF
 
 # --------------------------------
-# DRIVERS
+# GPU AUTO-DETECT + DRIVERS
 # --------------------------------
 echo "[UserBlade] Installing firmware and GPU drivers..."
 pacman -S --noconfirm linux-firmware mesa || echo "[UserBlade][WARN] firmware/mesa install failed."
@@ -142,13 +149,24 @@ pacman -S --noconfirm linux-firmware mesa || echo "[UserBlade][WARN] firmware/me
 GPU_INFO=$(lspci | grep -i 'vga\|3d\|display' || true)
 echo "[UserBlade] GPU detected: $GPU_INFO"
 
-if echo "$GPU_INFO" | grep -qi amd; then
+GPU_LOWER=$(echo "$GPU_INFO" | tr '[:upper:]' '[:lower:]')
+
+if echo "$GPU_LOWER" | grep -q "amd"; then
+  echo "[UserBlade] AMD GPU detected, installing xf86-video-amdgpu..."
   pacman -S --noconfirm xf86-video-amdgpu || echo "[UserBlade][WARN] AMD driver install failed."
-elif echo "$GPU_INFO" | grep -qi intel; then
+elif echo "$GPU_LOWER" | grep -q "intel"; then
+  echo "[UserBlade] Intel GPU detected, installing xf86-video-intel..."
   pacman -S --noconfirm xf86-video-intel || echo "[UserBlade][WARN] Intel driver install failed."
-elif echo "$GPU_INFO" | grep -qi nvidia; then
-  echo "[UserBlade][INFO] NVIDIA detected. Install proprietary drivers manually:"
-  echo "  sudo pacman -S nvidia nvidia-utils"
+elif echo "$GPU_LOWER" | grep -q "nvidia"; then
+  echo "[UserBlade] NVIDIA GPU detected, trying proprietary driver..."
+  if pacman -S --noconfirm nvidia nvidia-utils; then
+    echo "[UserBlade] NVIDIA proprietary driver installed."
+  else
+    echo "[UserBlade][WARN] NVIDIA proprietary failed, falling back to nouveau..."
+    pacman -S --noconfirm xf86-video-nouveau || echo "[UserBlade][WARN] nouveau install failed."
+  fi
+else
+  echo "[UserBlade][INFO] Unknown GPU type, relying on Mesa."
 fi
 
 # --------------------------------
@@ -172,7 +190,7 @@ sudo -u "$USER" yay -S --noconfirm \
   opentabletdriver || echo "[UserBlade][WARN] AUR apps install failed."
 
 # --------------------------------
-# AUDIO STACK
+# AUDIO STACK (PipeWire)
 # --------------------------------
 echo "[UserBlade] Installing PipeWire audio stack..."
 pacman -S --noconfirm \
@@ -260,26 +278,135 @@ Comment=Apply UserBlade KDE layout on login
 EOF
 
 # --------------------------------
-# FORCE KDE TAKEOVER (ANY DE)
+# USERBLADE THEME PACK (FULL KDE CONFIG INJECTION, APPLIED ONCE)
 # --------------------------------
-echo "[UserBlade] Forcing KDE Plasma to replace any existing desktop environment..."
+echo "[UserBlade] Injecting UserBlade theme into KDE configs (applied once)..."
 
+mkdir -p "$USER_HOME/.config" "$USER_HOME/.local/share/color-schemes" "$USER_HOME/.local/share/plasma/look-and-feel"
+
+# Color scheme
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.local/share/color-schemes/UserBlade.colors" >/dev/null
+[General]
+Name=UserBlade
+ColorScheme=UserBlade
+
+[Colors:Window]
+BackgroundNormal=#0A0A0F
+ForegroundNormal=#EAEAEA
+
+[Colors:Selection]
+BackgroundNormal=#A020F0
+ForegroundNormal=#FFFFFF
+
+[Colors:Button]
+BackgroundNormal=#14141F
+ForegroundNormal=#EAEAEA
+
+[Colors:View]
+BackgroundNormal=#0A0A0F
+ForegroundNormal=#EAEAEA
+EOF
+
+# kdeglobals
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/kdeglobals" >/dev/null
+[General]
+ColorScheme=UserBlade
+Name=UserBlade
+widgetStyle=Arc-Dark
+
+[Icons]
+Theme=Papirus-Dark
+
+[CursorTheme]
+Name=Breeze_Snow
+
+[WM]
+activeBackground=#0A0A0F
+activeForeground=#EAEAEA
+inactiveBackground=#14141F
+inactiveForeground=#A0A0A0
+EOF
+
+# GTK 3/4 settings
+mkdir -p "$USER_HOME/.config/gtk-3.0" "$USER_HOME/.config/gtk-4.0"
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/gtk-3.0/settings.ini" >/dev/null
+[Settings]
+gtk-theme-name=Arc-Dark
+gtk-icon-theme-name=Papirus-Dark
+gtk-cursor-theme-name=Breeze_Snow
+gtk-font-name=Noto Sans 10
+EOF
+
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/gtk-4.0/settings.ini" >/dev/null
+[Settings]
+gtk-theme-name=Arc-Dark
+gtk-icon-theme-name=Papirus-Dark
+gtk-cursor-theme-name=Breeze_Snow
+gtk-font-name=Noto Sans 10
+EOF
+
+# Splash screen
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/ksplashrc" >/dev/null
+[KSplash]
+Theme=org.kde.breeze
+EOF
+
+# Screen locker
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/kscreenlockerrc" >/dev/null
+[Greeter]
+Theme=org.kde.breeze
+EOF
+
+# Plasma general config
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/plasmarc" >/dev/null
+[Theme]
+name=Arc-Dark
+EOF
+
+# SDDM theme
+echo "[UserBlade] Configuring SDDM theme..."
+mkdir -p /etc/sddm.conf.d
+cat <<EOF | tee /etc/sddm.conf.d/theme.conf >/dev/null
+[Theme]
+Current=breeze
+EOF
+
+# --------------------------------
+# FORCE KDE TAKEOVER (ANY DE) - SAFE CLEAN (CORE DE COMPONENTS)
+# --------------------------------
+echo "[UserBlade] Removing core DE components (safe clean)..."
+
+# Remove core DE meta packages (but keep utilities)
+pacman -Rns --noconfirm xfce4 xfce4-goodies 2>/dev/null || echo "[UserBlade][INFO] XFCE not installed."
+pacman -Rns --noconfirm gnome gnome-shell 2>/dev/null || echo "[UserBlade][INFO] GNOME not installed."
+pacman -Rns --noconfirm lxqt lxqt-session 2>/dev/null || echo "[UserBlade][INFO] LXQt not installed."
+pacman -Rns --noconfirm lxde lxde-common 2>/dev/null || echo "[UserBlade][INFO] LXDE not installed."
+pacman -Rns --noconfirm cinnamon 2>/dev/null || echo "[UserBlade][INFO] Cinnamon not installed."
+pacman -Rns --noconfirm mate mate-extra 2>/dev/null || echo "[UserBlade][INFO] MATE not installed."
+pacman -Rns --noconfirm budgie-desktop 2>/dev/null || echo "[UserBlade][INFO] Budgie not installed."
+pacman -Rns --noconfirm deepin deepin-session-ui 2>/dev/null || echo "[UserBlade][INFO] Deepin not installed."
+pacman -Rns --noconfirm pantheon-session 2>/dev/null || echo "[UserBlade][INFO] Pantheon not installed."
+pacman -Rns --noconfirm enlightenment 2>/dev/null || echo "[UserBlade][INFO] Enlightenment not installed."
+pacman -Rns --noconfirm i3-wm i3status 2>/dev/null || echo "[UserBlade][INFO] i3 not installed."
+pacman -Rns --noconfirm openbox 2>/dev/null || echo "[UserBlade][INFO] Openbox not installed."
+
+echo "[UserBlade] Disabling and removing other display managers..."
 systemctl disable lightdm 2>/dev/null || echo "[UserBlade][INFO] lightdm not active."
 systemctl disable gdm 2>/dev/null || echo "[UserBlade][INFO] gdm not active."
 systemctl disable lxdm 2>/dev/null || echo "[UserBlade][INFO] lxdm not active."
-systemctl disable sddm 2>/dev/null || echo "[UserBlade][INFO] sddm was not active."
 systemctl disable mdm 2>/dev/null || echo "[UserBlade][INFO] mdm not active."
 systemctl disable slim 2>/dev/null || echo "[UserBlade][INFO] slim not active."
 
-systemctl stop lightdm 2>/dev/null || true
-systemctl stop gdm 2>/dev/null || true
-systemctl stop lxdm 2>/dev/null || true
-systemctl stop mdm 2>/dev/null || true
-systemctl stop slim 2>/dev/null || true
+pacman -Rns --noconfirm lightdm lightdm-gtk-greeter 2>/dev/null || echo "[UserBlade][INFO] lightdm packages not present."
+pacman -Rns --noconfirm gdm 2>/dev/null || echo "[UserBlade][INFO] gdm packages not present."
+pacman -Rns --noconfirm lxdm 2>/dev/null || echo "[UserBlade][INFO] lxdm packages not present."
+pacman -Rns --noconfirm mdm 2>/dev/null || echo "[UserBlade][INFO] mdm packages not present."
+pacman -Rns --noconfirm slim 2>/dev/null || echo "[UserBlade][INFO] slim packages not present."
 
-systemctl enable sddm || echo "[UserBlade][WARN] Failed to enable sddm."
-systemctl start sddm || echo "[UserBlade][WARN] Failed to start sddm."
-
+# --------------------------------
+# PLASMA SESSION FILE
+# --------------------------------
+echo "[UserBlade] Creating Plasma session file..."
 mkdir -p /usr/share/xsessions
 cat <<'EOF' > /usr/share/xsessions/plasma.desktop
 [Desktop Entry]
@@ -289,8 +416,40 @@ TryExec=startplasma-x11
 Name=Plasma
 EOF
 
-systemctl set-default graphical.target || echo "[UserBlade][WARN] Failed to set default target."
+# --------------------------------
+# VALIDATE PLASMA + SDDM
+# --------------------------------
+echo "[UserBlade] Validating Plasma and SDDM..."
 
+PLASMA_OK=0
+SDDM_OK=0
+
+if command -v startplasma-x11 >/dev/null 2>&1; then
+  PLASMA_OK=1
+else
+  echo "[UserBlade][WARN] startplasma-x11 not found, Plasma validation failed."
+fi
+
+if command -v sddm >/dev/null 2>&1; then
+  SDDM_OK=1
+else
+  echo "[UserBlade][WARN] sddm not found, SDDM validation failed."
+fi
+
+if [ "$PLASMA_OK" -eq 1 ] && [ "$SDDM_OK" -eq 1 ]; then
+  echo "[UserBlade] Plasma + SDDM validation passed. Enabling SDDM..."
+  systemctl disable display-manager 2>/dev/null || true
+  systemctl enable sddm || echo "[UserBlade][WARN] Failed to enable sddm."
+  systemctl set-default graphical.target || echo "[UserBlade][WARN] Failed to set default target."
+else
+  echo "[UserBlade][ERROR] Plasma or SDDM validation failed. Not switching DE."
+  echo "[UserBlade] Check logs at $LOG_FILE and fix issues before enabling SDDM manually."
+fi
+
+# --------------------------------
+# CLEAN AUTOSTART FROM OTHER DES
+# --------------------------------
+echo "[UserBlade] Cleaning autostart entries from other DEs..."
 rm -f "$USER_HOME/.config/autostart/xfce*" 2>/dev/null || true
 rm -f "$USER_HOME/.config/autostart/gnome*" 2>/dev/null || true
 rm -f "$USER_HOME/.config/autostart/lxqt*" 2>/dev/null || true
@@ -300,7 +459,7 @@ rm -f "$USER_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-session.xml" 2>
 rm -f "$USER_HOME/.config/lxqt/session.conf" 2>/dev/null || true
 rm -f "$USER_HOME/.config/gnome-session" 2>/dev/null || true
 
-echo "[UserBlade] KDE Plasma takeover complete. It will start on next boot."
+echo "[UserBlade] KDE Plasma takeover prepared. It will start on next boot if validation passed."
 
 # --------------------------------
 # USERBLADE VERSION + UPDATE SYSTEM
@@ -391,7 +550,7 @@ Your system is now configured with:
 - KDE Plasma
 - PipeWire audio stack
 - Flatpak + Flathub
-- UserBlade layout
+- UserBlade layout + theme
 - GUI control center + updater
 - ub-* terminal aliases
 
@@ -426,4 +585,4 @@ chown -R "$USER":"$USER" "$USER_HOME" || echo "[UserBlade][WARN] chown failed, c
 
 echo "[UserBlade] Installation complete."
 echo "[UserBlade] Log saved to: $LOG_FILE"
-echo "[UserBlade] Reboot to enter KDE Plasma (UserBlade)."
+echo "[UserBlade] Reboot to enter KDE Plasma (UserBlade) if validation passed."
