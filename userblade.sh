@@ -1,11 +1,18 @@
 #!/bin/bash
-set -e
+
+# --------------------------------
+# BASIC SAFETY + LOGGING
+# --------------------------------
+LOG_FILE="/var/log/userblade-installer.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "[UserBlade] Installer started at $(date)"
 
 # --------------------------------
 # ROOT + USER DETECTION
 # --------------------------------
 if [ "$(id -u)" -ne 0 ]; then
-  echo "Run this script with sudo: sudo ./userblade.sh"
+  echo "[UserBlade][ERROR] Run this script with sudo: sudo ./userblade.sh"
   exit 1
 fi
 
@@ -16,7 +23,7 @@ else
 fi
 
 if [ -z "$USER" ]; then
-  echo "Could not detect a non-root user. Create one first."
+  echo "[UserBlade][ERROR] Could not detect a non-root user. Create one first."
   exit 1
 fi
 
@@ -29,18 +36,20 @@ echo "[UserBlade] Target user: $USER ($USER_HOME)"
 FREE_KB=$(df --output=avail / | tail -n1)
 FREE_GB=$((FREE_KB / 1024 / 1024))
 echo "[UserBlade] Free space: ${FREE_GB}GB (recommended: >= 20GB)"
-sleep 3
+sleep 2
 
 # --------------------------------
 # SYSTEM UPDATE + CORE TOOLS
 # --------------------------------
-pacman -Syu --noconfirm
-pacman -S --noconfirm wget curl pciutils xdg-user-dirs
-sudo -u "$USER" xdg-user-dirs-update || true
+echo "[UserBlade] Updating system and installing core tools..."
+pacman -Syu --noconfirm || echo "[UserBlade][WARN] pacman -Syu failed, continuing..."
+pacman -S --noconfirm wget curl pciutils xdg-user-dirs || echo "[UserBlade][WARN] Core tools install failed, continuing..."
+sudo -u "$USER" xdg-user-dirs-update || echo "[UserBlade][WARN] xdg-user-dirs-update failed, continuing..."
 
 # --------------------------------
 # KDE PLASMA CORE
 # --------------------------------
+echo "[UserBlade] Installing KDE Plasma core..."
 pacman -S --noconfirm \
   plasma-desktop \
   plasma-workspace \
@@ -50,22 +59,22 @@ pacman -S --noconfirm \
   dolphin \
   systemsettings \
   sddm sddm-kcm \
-  xdg-desktop-portal-kde
-
-echo "[UserBlade] KDE Plasma core installed."
+  xdg-desktop-portal-kde || echo "[UserBlade][WARN] KDE core install failed, continuing..."
 
 # --------------------------------
 # FLATPAK + GVFS
 # --------------------------------
-pacman -S --noconfirm flatpak gvfs gvfs-mtp gvfs-gphoto2 gvfs-afc gvfs-smb
-sudo -u "$USER" flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || true
+echo "[UserBlade] Installing Flatpak + GVFS..."
+pacman -S --noconfirm flatpak gvfs gvfs-mtp gvfs-gphoto2 gvfs-afc gvfs-smb || echo "[UserBlade][WARN] Flatpak/GVFS install failed, continuing..."
+sudo -u "$USER" flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || echo "[UserBlade][WARN] Flathub add failed, continuing..."
 
 # --------------------------------
 # WALLPAPER + ICON
 # --------------------------------
+echo "[UserBlade] Downloading wallpaper and icon..."
 mkdir -p "$USER_HOME/Pictures" "$USER_HOME/Icons"
-sudo -u "$USER" wget -O "$USER_HOME/Pictures/userblade_wallpaper.jpg" "https://iili.io/C7P8pCg.jpg" || true
-sudo -u "$USER" wget -O "$USER_HOME/Icons/userblade_icon.png" "https://iili.io/C7ikyhX.png" || true
+sudo -u "$USER" wget -O "$USER_HOME/Pictures/userblade_wallpaper.jpg" "https://iili.io/C7P8pCg.jpg" || echo "[UserBlade][WARN] Wallpaper download failed."
+sudo -u "$USER" wget -O "$USER_HOME/Icons/userblade_icon.png" "https://iili.io/C7ikyhX.png" || echo "[UserBlade][WARN] Icon download failed."
 
 echo "UserBlade (Arch/BlackArch-based)" > /etc/issue
 echo "UserBlade" > /etc/userblade-name
@@ -73,24 +82,25 @@ echo "UserBlade" > /etc/userblade-name
 # --------------------------------
 # MULTILIB FOR STEAM
 # --------------------------------
+echo "[UserBlade] Ensuring multilib is enabled..."
 if ! grep -E '^
 
 \[multilib\]
 
 ' /etc/pacman.conf >/dev/null 2>&1; then
-  echo "[UserBlade] Enabling multilib..."
   cat <<'EOF' >> /etc/pacman.conf
 
 [multilib]
 Include = /etc/pacman.d/mirrorlist
 EOF
-  pacman -Syu --noconfirm
+  pacman -Syu --noconfirm || echo "[UserBlade][WARN] pacman -Syu after multilib failed, continuing..."
 fi
 
 # --------------------------------
 # YAY (AUR HELPER)
 # --------------------------------
-pacman -S --noconfirm base-devel git
+echo "[UserBlade] Installing yay (AUR helper)..."
+pacman -S --noconfirm base-devel git || echo "[UserBlade][WARN] base-devel/git install failed, continuing..."
 
 YAY_DIR="$USER_HOME/yay"
 if [ -d "$YAY_DIR" ]; then
@@ -103,18 +113,20 @@ fi
 if ! command -v yay >/dev/null 2>&1; then
   cd "$USER_HOME"
   if [ ! -d yay ]; then
-    sudo -u "$USER" git clone https://aur.archlinux.org/yay.git
+    sudo -u "$USER" git clone https://aur.archlinux.org/yay.git || echo "[UserBlade][WARN] yay clone failed."
   fi
-  cd yay
-  sudo -u "$USER" makepkg -si --noconfirm
+  cd yay 2>/dev/null || cd "$USER_HOME"
+  sudo -u "$USER" makepkg -si --noconfirm || echo "[UserBlade][WARN] yay build/install failed."
   cd "$USER_HOME"
 fi
 
 # --------------------------------
 # THEMING + QT CONTROL
 # --------------------------------
-sudo -u "$USER" yay -S --noconfirm kvantum-theme-arc arc-kde papirus-icon-theme qt5ct qt6ct || true
+echo "[UserBlade] Installing theming (Kvantum, Arc, Papirus, qt5ct/qt6ct)..."
+sudo -u "$USER" yay -S --noconfirm kvantum-theme-arc arc-kde papirus-icon-theme qt5ct qt6ct || echo "[UserBlade][WARN] theming AUR packages failed."
 
+echo "[UserBlade] Configuring Kvantum..."
 mkdir -p "$USER_HOME/.config/Kvantum"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/Kvantum/kvantum.kvconfig" >/dev/null
 [General]
@@ -124,29 +136,32 @@ EOF
 # --------------------------------
 # DRIVERS
 # --------------------------------
-pacman -S --noconfirm linux-firmware mesa
+echo "[UserBlade] Installing firmware and GPU drivers..."
+pacman -S --noconfirm linux-firmware mesa || echo "[UserBlade][WARN] firmware/mesa install failed."
 
 GPU_INFO=$(lspci | grep -i 'vga\|3d\|display' || true)
-echo "[UserBlade] GPU: $GPU_INFO"
+echo "[UserBlade] GPU detected: $GPU_INFO"
 
 if echo "$GPU_INFO" | grep -qi amd; then
-  pacman -S --noconfirm xf86-video-amdgpu || true
+  pacman -S --noconfirm xf86-video-amdgpu || echo "[UserBlade][WARN] AMD driver install failed."
 elif echo "$GPU_INFO" | grep -qi intel; then
-  pacman -S --noconfirm xf86-video-intel || true
+  pacman -S --noconfirm xf86-video-intel || echo "[UserBlade][WARN] Intel driver install failed."
 elif echo "$GPU_INFO" | grep -qi nvidia; then
-  echo "[UserBlade] NVIDIA detected. Install proprietary drivers manually:"
-  echo "sudo pacman -S nvidia nvidia-utils"
+  echo "[UserBlade][INFO] NVIDIA detected. Install proprietary drivers manually:"
+  echo "  sudo pacman -S nvidia nvidia-utils"
 fi
 
 # --------------------------------
 # DEV TOOLS
 # --------------------------------
-pacman -S --noconfirm jdk-openjdk python python-pip nodejs npm git
+echo "[UserBlade] Installing development tools..."
+pacman -S --noconfirm jdk-openjdk python python-pip nodejs npm git || echo "[UserBlade][WARN] dev tools install failed."
 
 # --------------------------------
 # APPLICATION SUITE
 # --------------------------------
-pacman -S --noconfirm steam obs-studio krita firefox vlc gimp qbittorrent thunderbird cpu-x ghex || true
+echo "[UserBlade] Installing application suite..."
+pacman -S --noconfirm steam obs-studio krita firefox vlc gimp qbittorrent thunderbird cpu-x ghex || echo "[UserBlade][WARN] core apps install failed."
 
 sudo -u "$USER" yay -S --noconfirm \
   onlyoffice-bin \
@@ -154,11 +169,12 @@ sudo -u "$USER" yay -S --noconfirm \
   discord \
   whatsie \
   visual-studio-code-bin \
-  opentabletdriver || true
+  opentabletdriver || echo "[UserBlade][WARN] AUR apps install failed."
 
 # --------------------------------
 # AUDIO STACK
 # --------------------------------
+echo "[UserBlade] Installing PipeWire audio stack..."
 pacman -S --noconfirm \
   pipewire \
   pipewire-alsa \
@@ -167,16 +183,18 @@ pacman -S --noconfirm \
   wireplumber \
   pavucontrol-qt \
   easyeffects \
-  helvum || true
+  helvum || echo "[UserBlade][WARN] audio stack install failed."
 
 # --------------------------------
 # ACCESSIBILITY
 # --------------------------------
-pacman -S --noconfirm kaccess kmag kmousetool || true
+echo "[UserBlade] Installing accessibility tools..."
+pacman -S --noconfirm kaccess kmag kmousetool || echo "[UserBlade][WARN] accessibility tools install failed."
 
 # --------------------------------
 # KDE LAYOUT TEMPLATE
 # --------------------------------
+echo "[UserBlade] Creating KDE layout template..."
 LAYOUT_DIR="$USER_HOME/.local/share/plasma/layout-templates"
 mkdir -p "$LAYOUT_DIR"
 
@@ -216,6 +234,7 @@ EOF
 # --------------------------------
 # AUTO-APPLY KDE LAYOUT
 # --------------------------------
+echo "[UserBlade] Setting up auto layout application..."
 mkdir -p "$USER_HOME/.local/bin"
 
 AUTO_LAYOUT_SCRIPT="$USER_HOME/.local/bin/userblade-apply-layout.sh"
@@ -232,7 +251,7 @@ mkdir -p "$USER_HOME/.config/autostart"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart/userblade-apply-layout.desktop" >/dev/null
 [Desktop Entry]
 Type=Application
-Exec=$USER_HOME/.local/bin/userblade-apply-layout.sh
+Exec=$HOME/.local/bin/userblade-apply-layout.sh
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
@@ -245,12 +264,12 @@ EOF
 # --------------------------------
 echo "[UserBlade] Forcing KDE Plasma to replace any existing desktop environment..."
 
-systemctl disable lightdm 2>/dev/null || true
-systemctl disable gdm 2>/dev/null || true
-systemctl disable lxdm 2>/dev/null || true
-systemctl disable sddm 2>/dev/null || true
-systemctl disable mdm 2>/dev/null || true
-systemctl disable slim 2>/dev/null || true
+systemctl disable lightdm 2>/dev/null || echo "[UserBlade][INFO] lightdm not active."
+systemctl disable gdm 2>/dev/null || echo "[UserBlade][INFO] gdm not active."
+systemctl disable lxdm 2>/dev/null || echo "[UserBlade][INFO] lxdm not active."
+systemctl disable sddm 2>/dev/null || echo "[UserBlade][INFO] sddm was not active."
+systemctl disable mdm 2>/dev/null || echo "[UserBlade][INFO] mdm not active."
+systemctl disable slim 2>/dev/null || echo "[UserBlade][INFO] slim not active."
 
 systemctl stop lightdm 2>/dev/null || true
 systemctl stop gdm 2>/dev/null || true
@@ -258,8 +277,8 @@ systemctl stop lxdm 2>/dev/null || true
 systemctl stop mdm 2>/dev/null || true
 systemctl stop slim 2>/dev/null || true
 
-systemctl enable sddm
-systemctl start sddm
+systemctl enable sddm || echo "[UserBlade][WARN] Failed to enable sddm."
+systemctl start sddm || echo "[UserBlade][WARN] Failed to start sddm."
 
 mkdir -p /usr/share/xsessions
 cat <<'EOF' > /usr/share/xsessions/plasma.desktop
@@ -270,7 +289,7 @@ TryExec=startplasma-x11
 Name=Plasma
 EOF
 
-systemctl set-default graphical.target
+systemctl set-default graphical.target || echo "[UserBlade][WARN] Failed to set default target."
 
 rm -f "$USER_HOME/.config/autostart/xfce*" 2>/dev/null || true
 rm -f "$USER_HOME/.config/autostart/gnome*" 2>/dev/null || true
@@ -286,11 +305,12 @@ echo "[UserBlade] KDE Plasma takeover complete. It will start on next boot."
 # --------------------------------
 # USERBLADE VERSION + UPDATE SYSTEM
 # --------------------------------
+echo "[UserBlade] Setting up versioning and update system..."
 echo "1.0.0" > /etc/userblade-version
 
 UPDATE_SCRIPT="$USER_HOME/.local/bin/update.sh"
-sudo -u "$USER" wget -O "$UPDATE_SCRIPT" "https://raw.githubusercontent.com/UnknownSkittle/UserBlade-Installer/main/update.sh" || true
-sudo -u "$USER" chmod +x "$UPDATE_SCRIPT"
+sudo -u "$USER" wget -O "$UPDATE_SCRIPT" "https://raw.githubusercontent.com/UnknownSkittle/UserBlade-Installer/main/update.sh" || echo "[UserBlade][WARN] Failed to download update.sh."
+sudo -u "$USER" chmod +x "$UPDATE_SCRIPT" || echo "[UserBlade][WARN] Failed to chmod update.sh."
 
 CHECKER="$USER_HOME/.local/bin/userblade-check-updates.sh"
 cat <<EOF | sudo -u "$USER" tee "$CHECKER" >/dev/null
@@ -306,7 +326,7 @@ sudo -u "$USER" chmod +x "$CHECKER"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart/userblade-update-check.desktop" >/dev/null
 [Desktop Entry]
 Type=Application
-Exec=$USER_HOME/.local/bin/userblade-check-updates.sh
+Exec=$HOME/.local/bin/userblade-check-updates.sh
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
@@ -317,6 +337,7 @@ EOF
 # --------------------------------
 # CONTROL CENTER & UPDATER
 # --------------------------------
+echo "[UserBlade] Creating Control Center and Updater launchers..."
 mkdir -p "$USER_HOME/.local/share/applications"
 
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.local/share/applications/userblade-control-center.desktop" >/dev/null
@@ -324,7 +345,7 @@ cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.local/share/applications/userblade-
 Name=UserBlade Control Center
 Comment=Manage updates, apps, and system tools
 Exec=sh -c "bauh &"
-Icon=$USER_HOME/Icons/userblade_icon.png
+Icon=$HOME/Icons/userblade_icon.png
 Terminal=false
 Type=Application
 Categories=System;
@@ -334,7 +355,7 @@ cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.local/share/applications/userblade-
 [Desktop Entry]
 Name=UserBlade Updater
 Comment=Run UserBlade update script
-Exec=$USER_HOME/.local/bin/update.sh
+Exec=$HOME/.local/bin/update.sh
 Icon=system-software-update
 Terminal=false
 Type=Application
@@ -344,6 +365,7 @@ EOF
 # --------------------------------
 # ALIASES
 # --------------------------------
+echo "[UserBlade] Creating terminal aliases..."
 ALIAS_FILE="$USER_HOME/.userblade_aliases"
 cat <<'EOF' | sudo -u "$USER" tee "$ALIAS_FILE" >/dev/null
 alias ub-update='sudo pacman -Syu && yay -Syu && flatpak update'
@@ -354,6 +376,7 @@ EOF
 # --------------------------------
 # WELCOME SCREEN
 # --------------------------------
+echo "[UserBlade] Setting up welcome screen..."
 WELCOME_SCRIPT="$USER_HOME/.local/bin/userblade-welcome.sh"
 cat <<'EOF' | sudo -u "$USER" tee "$WELCOME_SCRIPT" >/dev/null
 #!/bin/bash
@@ -387,7 +410,7 @@ sudo -u "$USER" chmod +x "$WELCOME_SCRIPT"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart/userblade-welcome.desktop" >/dev/null
 [Desktop Entry]
 Type=Application
-Exec=$USER_HOME/.local/bin/userblade-welcome.sh
+Exec=$HOME/.local/bin/userblade-welcome.sh
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
@@ -398,6 +421,9 @@ EOF
 # --------------------------------
 # OWNERSHIP FIX
 # --------------------------------
-chown -R "$USER":"$USER" "$USER_HOME"
+echo "[UserBlade] Fixing ownership for $USER_HOME..."
+chown -R "$USER":"$USER" "$USER_HOME" || echo "[UserBlade][WARN] chown failed, continuing."
 
-echo "[UserBlade] Installation complete. Reboot to enter KDE Plasma (UserBlade)."
+echo "[UserBlade] Installation complete."
+echo "[UserBlade] Log saved to: $LOG_FILE"
+echo "[UserBlade] Reboot to enter KDE Plasma (UserBlade)."
