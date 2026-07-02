@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# --------------------------------
+# ROOT + USER DETECTION
+# --------------------------------
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run this script with sudo: sudo ./userblade.sh"
   exit 1
@@ -13,42 +16,69 @@ else
 fi
 
 if [ -z "$USER" ]; then
-  echo "Could not detect a non-root user."
+  echo "Could not detect a non-root user. Create one first."
   exit 1
 fi
 
 USER_HOME=$(eval echo "~$USER")
+echo "[UserBlade] Target user: $USER ($USER_HOME)"
 
+# --------------------------------
+# DISK SPACE INFO
+# --------------------------------
 FREE_KB=$(df --output=avail / | tail -n1)
 FREE_GB=$((FREE_KB / 1024 / 1024))
-
-echo "[UserBlade] Free space: ${FREE_GB}GB"
+echo "[UserBlade] Free space: ${FREE_GB}GB (recommended: >= 20GB)"
 sleep 3
 
+# --------------------------------
+# SYSTEM UPDATE + CORE TOOLS
+# --------------------------------
 pacman -Syu --noconfirm
-pacman -S --noconfirm wget pciutils xdg-user-dirs
+pacman -S --noconfirm wget curl pciutils xdg-user-dirs
 sudo -u "$USER" xdg-user-dirs-update || true
 
+# --------------------------------
+# KDE PLASMA CORE
+# --------------------------------
 pacman -S --noconfirm \
-  plasma-desktop plasma-workspace plasma-workspace-wallpapers plasma-systemmonitor \
-  konsole dolphin systemsettings sddm sddm-kcm xdg-desktop-portal-kde
+  plasma-desktop \
+  plasma-workspace \
+  plasma-workspace-wallpapers \
+  plasma-systemmonitor \
+  konsole \
+  dolphin \
+  systemsettings \
+  sddm sddm-kcm \
+  xdg-desktop-portal-kde
 
-systemctl enable sddm
+echo "[UserBlade] KDE Plasma core installed."
 
+# --------------------------------
+# FLATPAK + GVFS
+# --------------------------------
 pacman -S --noconfirm flatpak gvfs gvfs-mtp gvfs-gphoto2 gvfs-afc gvfs-smb
 sudo -u "$USER" flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || true
 
+# --------------------------------
+# WALLPAPER + ICON
+# --------------------------------
 mkdir -p "$USER_HOME/Pictures" "$USER_HOME/Icons"
-sudo -u "$USER" wget -O "$USER_HOME/Pictures/userblade_wallpaper.jpg" "https://iili.io/C7P8pCg.jpg"
-sudo -u "$USER" wget -O "$USER_HOME/Icons/userblade_icon.png" "https://iili.io/C7ikyhX.png"
+sudo -u "$USER" wget -O "$USER_HOME/Pictures/userblade_wallpaper.jpg" "https://iili.io/C7P8pCg.jpg" || true
+sudo -u "$USER" wget -O "$USER_HOME/Icons/userblade_icon.png" "https://iili.io/C7ikyhX.png" || true
 
+echo "UserBlade (Arch/BlackArch-based)" > /etc/issue
 echo "UserBlade" > /etc/userblade-name
 
+# --------------------------------
+# MULTILIB FOR STEAM
+# --------------------------------
 if ! grep -E '^
 
 \[multilib\]
 
-' /etc/pacman.conf >/dev/null; then
+' /etc/pacman.conf >/dev/null 2>&1; then
+  echo "[UserBlade] Enabling multilib..."
   cat <<'EOF' >> /etc/pacman.conf
 
 [multilib]
@@ -57,115 +87,14 @@ EOF
   pacman -Syu --noconfirm
 fi
 
+# --------------------------------
+# YAY (AUR HELPER)
+# --------------------------------
 pacman -S --noconfirm base-devel git
 
-if ! command -v yay >/dev/null; then
-  cd "$USER_HOME"
-  sudo -u "$USER" git clone https://aur.archlinux.org/yay.git
-  cd yay
-  sudo -u "$USER" makepkg -si --noconfirm
-fi
-
-sudo -u "$USER" yay -S --noconfirm bauh kvantum-theme-arc arc-kde papirus-icon-theme qt5ct qt6ct
-
-mkdir -p "$USER_HOME/.config/Kvantum"
-echo "[General]
-theme=Arc-Dark" | sudo -u "$USER" tee "$USER_HOME/.config/Kvantum/kvantum.kvconfig"
-
-pacman -S --noconfirm linux-firmware mesa
-
-GPU_INFO=$(lspci | grep -i 'vga\|3d\|display')
-if echo "$GPU_INFO" | grep -qi amd; then pacman -S --noconfirm xf86-video-amdgpu; fi
-if echo "$GPU_INFO" | grep -qi intel; then pacman -S --noconfirm xf86-video-intel; fi
-
-pacman -S --noconfirm jdk-openjdk python python-pip nodejs npm
-
-pacman -S --noconfirm steam obs-studio krita firefox vlc gimp qbittorrent thunderbird cpu-x git ghex
-
-sudo -u "$USER" yay -S --noconfirm onlyoffice-bin bottles discord whatsie visual-studio-code-bin opentabletdriver
-
-pacman -S --noconfirm pipewire pipewire-alsa pipewire-pulse pipewire-jack wireplumber pavucontrol-qt easyeffects helvum
-
-pacman -S --noconfirm kaccess kmag kmousetool
-
-LAYOUT_DIR="$USER_HOME/.local/share/plasma/layout-templates"
-mkdir -p "$LAYOUT_DIR"
-
-cat <<EOF | sudo -u "$USER" tee "$LAYOUT_DIR/userblade.layout.lay"
-[Desktop]
-LayoutJS=org.kde.plasma.desktop-layout.js
-
-[Containments][1]
-plugin=org.kde.plasma.desktop
-location=0
-formfactor=0
-wallpaperplugin=org.kde.image
-
-[Containments][1][Wallpaper][org.kde.image][General]
-Image=file://$USER_HOME/Pictures/userblade_wallpaper.jpg
-
-[Containments][2]
-plugin=org.kde.plasma.panel
-location=3
-formfactor=2
-
-[Containments][3]
-plugin=org.kde.plasma.panel
-location=1
-formfactor=2
-
-[Containments][3][Applets][1]
-plugin=org.kde.plasma.appmenu
-
-[Containments][3][Applets][2]
-plugin=org.kde.plasma.systemtray
-EOF
-
-AUTO_LAYOUT="$USER_HOME/.local/bin/userblade-apply-layout.sh"
-cat <<EOF | sudo -u "$USER" tee "$AUTO_LAYOUT"
-#!/bin/bash
-LAYOUT="\$HOME/.local/share/plasma/layout-templates/userblade.layout.lay"
-if command -v plasma-apply-layout >/dev/null; then
-    plasma-apply-layout "\$LAYOUT"
-fi
-EOF
-sudo -u "$USER" chmod +x "$AUTO_LAYOUT"
-
-mkdir -p "$USER_HOME/.config/autostart"
-cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart/userblade-apply-layout.desktop"
-[Desktop Entry]
-Type=Application
-Exec=$USER_HOME/.local/bin/userblade-apply-layout.sh
-Name=UserBlade Layout
-EOF
-
-echo "1.0.0" > /etc/userblade-version
-
-UPDATE_SCRIPT="$USER_HOME/.local/bin/update.sh"
-sudo -u "$USER" wget -O "$UPDATE_SCRIPT" "https://raw.githubusercontent.com/UnknownSkittle/UserBlade-Installer/main/update.sh"
-sudo -u "$USER" chmod +x "$UPDATE_SCRIPT"
-
-CHECKER="$USER_HOME/.local/bin/userblade-check-updates.sh"
-cat <<EOF | sudo -u "$USER" tee "$CHECKER"
-#!/bin/bash
-LOCAL_VERSION=\$(cat /etc/userblade-version)
-REMOTE_VERSION=\$(curl -s https://raw.githubusercontent.com/UnknownSkittle/UserBlade-Installer/main/version.txt)
-if [ "\$LOCAL_VERSION" != "\$REMOTE_VERSION" ]; then
-    notify-send "UserBlade Update Available" "New version: \$REMOTE_VERSION (installed: \$LOCAL_VERSION)"
-fi
-EOF
-sudo -u "$USER" chmod +x "$CHECKER"
-
-cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart/userblade-update-check.desktop"
-[Desktop Entry]
-Type=Application
-Exec=$USER_HOME/.local/bin/userblade-check-updates.sh
-Name=UserBlade Update Checker
-EOF
-
-chown -R "$USER":"$USER" "$USER_HOME"
-
-echo "[UserBlade] Installation complete."
+YAY_DIR="$USER_HOME/yay"
+if [ -d "$YAY_DIR" ]; then
+  OWNER=$(stat -c "%U" "$YAY_DIR")
   if [ "$OWNER" != "$USER" ]; then
     chown -R "$USER":"$USER" "$YAY_DIR"
   fi
@@ -181,14 +110,9 @@ if ! command -v yay >/dev/null 2>&1; then
   cd "$USER_HOME"
 fi
 
-# -----------------------------
-#  BAUH (GUI PACKAGE MANAGER)
-# -----------------------------
-sudo -u "$USER" yay -S --noconfirm bauh || true
-
-# -----------------------------
-#  THEMING + QT CONTROL
-# -----------------------------
+# --------------------------------
+# THEMING + QT CONTROL
+# --------------------------------
 sudo -u "$USER" yay -S --noconfirm kvantum-theme-arc arc-kde papirus-icon-theme qt5ct qt6ct || true
 
 mkdir -p "$USER_HOME/.config/Kvantum"
@@ -197,14 +121,9 @@ cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/Kvantum/kvantum.kvconfig" >/
 theme=Arc-Dark
 EOF
 
-# -----------------------------
-#  SYSTEM TOOLS
-# -----------------------------
-pacman -S --noconfirm htop bpytop gnome-system-monitor
-
-# -----------------------------
-#  DRIVERS
-# -----------------------------
+# --------------------------------
+# DRIVERS
+# --------------------------------
 pacman -S --noconfirm linux-firmware mesa
 
 GPU_INFO=$(lspci | grep -i 'vga\|3d\|display' || true)
@@ -219,16 +138,15 @@ elif echo "$GPU_INFO" | grep -qi nvidia; then
   echo "sudo pacman -S nvidia nvidia-utils"
 fi
 
-# -----------------------------
-#  DEV TOOLS
-# -----------------------------
-pacman -S --noconfirm jdk-openjdk python python-pip nodejs npm
+# --------------------------------
+# DEV TOOLS
+# --------------------------------
+pacman -S --noconfirm jdk-openjdk python python-pip nodejs npm git
 
-# -----------------------------
-#  APPLICATION SUITE
-# -----------------------------
-pacman -S --noconfirm steam obs-studio krita firefox vlc || true
-pacman -S --noconfirm gimp qbittorrent thunderbird cpu-x git ghex || true
+# --------------------------------
+# APPLICATION SUITE
+# --------------------------------
+pacman -S --noconfirm steam obs-studio krita firefox vlc gimp qbittorrent thunderbird cpu-x ghex || true
 
 sudo -u "$USER" yay -S --noconfirm \
   onlyoffice-bin \
@@ -238,9 +156,9 @@ sudo -u "$USER" yay -S --noconfirm \
   visual-studio-code-bin \
   opentabletdriver || true
 
-# -----------------------------
-#  AUDIO STACK
-# -----------------------------
+# --------------------------------
+# AUDIO STACK
+# --------------------------------
 pacman -S --noconfirm \
   pipewire \
   pipewire-alsa \
@@ -251,14 +169,14 @@ pacman -S --noconfirm \
   easyeffects \
   helvum || true
 
-# -----------------------------
-#  ACCESSIBILITY
-# -----------------------------
+# --------------------------------
+# ACCESSIBILITY
+# --------------------------------
 pacman -S --noconfirm kaccess kmag kmousetool || true
 
-# -----------------------------
-#  KDE LAYOUT TEMPLATE
-# -----------------------------
+# --------------------------------
+# KDE LAYOUT TEMPLATE
+# --------------------------------
 LAYOUT_DIR="$USER_HOME/.local/share/plasma/layout-templates"
 mkdir -p "$LAYOUT_DIR"
 
@@ -295,20 +213,19 @@ plugin=org.kde.plasma.appmenu
 plugin=org.kde.plasma.systemtray
 EOF
 
-# -----------------------------
-#  AUTO-APPLY KDE LAYOUT
-# -----------------------------
-AUTO_LAYOUT_SCRIPT="$USER_HOME/.local/bin/userblade-apply-layout.sh"
+# --------------------------------
+# AUTO-APPLY KDE LAYOUT
+# --------------------------------
 mkdir -p "$USER_HOME/.local/bin"
 
+AUTO_LAYOUT_SCRIPT="$USER_HOME/.local/bin/userblade-apply-layout.sh"
 cat <<EOF | sudo -u "$USER" tee "$AUTO_LAYOUT_SCRIPT" >/dev/null
 #!/bin/bash
-LAYOUT="$HOME/.local/share/plasma/layout-templates/userblade.layout.lay"
+LAYOUT="\$HOME/.local/share/plasma/layout-templates/userblade.layout.lay"
 if command -v plasma-apply-layout >/dev/null 2>&1; then
     plasma-apply-layout "\$LAYOUT"
 fi
 EOF
-
 sudo -u "$USER" chmod +x "$AUTO_LAYOUT_SCRIPT"
 
 mkdir -p "$USER_HOME/.config/autostart"
@@ -323,9 +240,83 @@ Name=UserBlade Layout
 Comment=Apply UserBlade KDE layout on login
 EOF
 
-# -----------------------------
-#  CONTROL CENTER + UPDATER
-# -----------------------------
+# --------------------------------
+# FORCE KDE TAKEOVER (ANY DE)
+# --------------------------------
+echo "[UserBlade] Forcing KDE Plasma to replace any existing desktop environment..."
+
+systemctl disable lightdm 2>/dev/null || true
+systemctl disable gdm 2>/dev/null || true
+systemctl disable lxdm 2>/dev/null || true
+systemctl disable sddm 2>/dev/null || true
+systemctl disable mdm 2>/dev/null || true
+systemctl disable slim 2>/dev/null || true
+
+systemctl stop lightdm 2>/dev/null || true
+systemctl stop gdm 2>/dev/null || true
+systemctl stop lxdm 2>/dev/null || true
+systemctl stop mdm 2>/dev/null || true
+systemctl stop slim 2>/dev/null || true
+
+systemctl enable sddm
+systemctl start sddm
+
+mkdir -p /usr/share/xsessions
+cat <<'EOF' > /usr/share/xsessions/plasma.desktop
+[Desktop Entry]
+Type=XSession
+Exec=startplasma-x11
+TryExec=startplasma-x11
+Name=Plasma
+EOF
+
+systemctl set-default graphical.target
+
+rm -f "$USER_HOME/.config/autostart/xfce*" 2>/dev/null || true
+rm -f "$USER_HOME/.config/autostart/gnome*" 2>/dev/null || true
+rm -f "$USER_HOME/.config/autostart/lxqt*" 2>/dev/null || true
+rm -f "$USER_HOME/.config/autostart/openbox*" 2>/dev/null || true
+
+rm -f "$USER_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-session.xml" 2>/dev/null || true
+rm -f "$USER_HOME/.config/lxqt/session.conf" 2>/dev/null || true
+rm -f "$USER_HOME/.config/gnome-session" 2>/dev/null || true
+
+echo "[UserBlade] KDE Plasma takeover complete. It will start on next boot."
+
+# --------------------------------
+# USERBLADE VERSION + UPDATE SYSTEM
+# --------------------------------
+echo "1.0.0" > /etc/userblade-version
+
+UPDATE_SCRIPT="$USER_HOME/.local/bin/update.sh"
+sudo -u "$USER" wget -O "$UPDATE_SCRIPT" "https://raw.githubusercontent.com/UnknownSkittle/UserBlade-Installer/main/update.sh" || true
+sudo -u "$USER" chmod +x "$UPDATE_SCRIPT"
+
+CHECKER="$USER_HOME/.local/bin/userblade-check-updates.sh"
+cat <<EOF | sudo -u "$USER" tee "$CHECKER" >/dev/null
+#!/bin/bash
+LOCAL_VERSION=\$(cat /etc/userblade-version 2>/dev/null || echo "unknown")
+REMOTE_VERSION=\$(curl -s https://raw.githubusercontent.com/UnknownSkittle/UserBlade-Installer/main/version.txt)
+if [ -n "\$REMOTE_VERSION" ] && [ "\$LOCAL_VERSION" != "\$REMOTE_VERSION" ]; then
+    notify-send "UserBlade Update Available" "New version: \$REMOTE_VERSION (installed: \$LOCAL_VERSION)"
+fi
+EOF
+sudo -u "$USER" chmod +x "$CHECKER"
+
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart/userblade-update-check.desktop" >/dev/null
+[Desktop Entry]
+Type=Application
+Exec=$USER_HOME/.local/bin/userblade-check-updates.sh
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=UserBlade Update Checker
+Comment=Checks for new UserBlade versions
+EOF
+
+# --------------------------------
+# CONTROL CENTER & UPDATER
+# --------------------------------
 mkdir -p "$USER_HOME/.local/share/applications"
 
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.local/share/applications/userblade-control-center.desktop" >/dev/null
@@ -342,17 +333,17 @@ EOF
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.local/share/applications/userblade-updater.desktop" >/dev/null
 [Desktop Entry]
 Name=UserBlade Updater
-Comment=Update system, Flatpak, and AUR via GUI
-Exec=sh -c "bauh &"
+Comment=Run UserBlade update script
+Exec=$USER_HOME/.local/bin/update.sh
 Icon=system-software-update
 Terminal=false
 Type=Application
 Categories=System;
 EOF
 
-# -----------------------------
-#  ALIASES (SHELL-AGNOSTIC)
-# -----------------------------
+# --------------------------------
+# ALIASES
+# --------------------------------
 ALIAS_FILE="$USER_HOME/.userblade_aliases"
 cat <<'EOF' | sudo -u "$USER" tee "$ALIAS_FILE" >/dev/null
 alias ub-update='sudo pacman -Syu && yay -Syu && flatpak update'
@@ -360,12 +351,10 @@ alias ub-search='pacman -Ss'
 alias ub-install='sudo pacman -S'
 EOF
 
-# -----------------------------
-#  WELCOME SCREEN
-# -----------------------------
+# --------------------------------
+# WELCOME SCREEN
+# --------------------------------
 WELCOME_SCRIPT="$USER_HOME/.local/bin/userblade-welcome.sh"
-mkdir -p "$USER_HOME/.local/bin"
-
 cat <<'EOF' | sudo -u "$USER" tee "$WELCOME_SCRIPT" >/dev/null
 #!/bin/bash
 FLAG="$HOME/.config/userblade-welcome-disabled"
@@ -375,11 +364,11 @@ if [ -f "$FLAG" ]; then exit 0; fi
 
 MSG="Welcome to UserBlade!
 
-Your system is now fully configured with:
+Your system is now configured with:
 - KDE Plasma
 - PipeWire audio stack
 - Flatpak + Flathub
-- UserBlade layout (auto-applied)
+- UserBlade layout
 - GUI control center + updater
 - ub-* terminal aliases
 
@@ -393,7 +382,6 @@ else
   echo "$MSG"
 fi
 EOF
-
 sudo -u "$USER" chmod +x "$WELCOME_SCRIPT"
 
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart/userblade-welcome.desktop" >/dev/null
@@ -407,9 +395,9 @@ Name=UserBlade Welcome
 Comment=Show UserBlade tutorial on startup
 EOF
 
-# -----------------------------
-#  FINAL OWNERSHIP FIX
-# -----------------------------
+# --------------------------------
+# OWNERSHIP FIX
+# --------------------------------
 chown -R "$USER":"$USER" "$USER_HOME"
 
-echo "[UserBlade] Installation complete. Reboot into KDE Plasma."
+echo "[UserBlade] Installation complete. Reboot to enter KDE Plasma (UserBlade)."
