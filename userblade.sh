@@ -290,7 +290,7 @@ sudo -u "$USER" mkdir -p "$USER_HOME/.config/gtk-3.0"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/gtk-3.0/settings.ini" >/dev/null
 [Settings]
 gtk-theme-name=Arc-Dark
-gtk-icon-theme-name=Papirus-Dark
+gtk-icon-theme-name=UserBlade
 gtk-cursor-theme-name=Breeze_Snow
 gtk-application-prefer-dark-theme=1
 gtk-font-name=Noto Sans 10
@@ -304,7 +304,7 @@ sudo -u "$USER" mkdir -p "$USER_HOME/.config/gtk-4.0"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/gtk-4.0/settings.ini" >/dev/null
 [Settings]
 gtk-theme-name=Arc-Dark
-gtk-icon-theme-name=Papirus-Dark
+gtk-icon-theme-name=UserBlade
 gtk-cursor-theme-name=Breeze_Snow
 gtk-application-prefer-dark-theme=1
 EOF
@@ -392,6 +392,41 @@ cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/plasmashellrc" >/dev/null
 Theme=org.kde.breezedark.desktop
 EOF
 
+# Plasma panel layout config for Plasma 6
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" >/dev/null
+[Containments][1]
+activityId=
+formfactor=2
+immutability=1
+location=1
+plugin=org.kde.plasma.panel
+
+[Containments][1][Applets][1]
+plugin=org.kde.plasma.kickoff
+
+[Containments][1][Applets][2]
+plugin=org.kde.plasma.taskmanager
+
+[Containments][1][Applets][3]
+plugin=org.kde.plasma.systemtray
+
+[Containments][1][Applets][4]
+plugin=org.kde.plasma.digitalclock
+
+[Containments][2]
+activityId=
+formfactor=2
+immutability=1
+location=3
+plugin=org.kde.plasma.panel
+
+[Containments][2][Applets][1]
+plugin=org.kde.plasma.taskmanager
+
+[Containments][2][Applets][2]
+plugin=org.kde.plasma.systemtray
+EOF
+
 # Kwinrc for window manager
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/kwinrc" >/dev/null
 [General]
@@ -433,13 +468,55 @@ log() {
   echo "[UserBlade Layout] $*" | tee -a "$HOME_DIR/.local/share/userblade.log"
 }
 
-if [ -f "$MARKER" ]; then
-  log "Already applied once; exiting."
+if [ -f "$MARKER" ] && grep -q '^Theme=UserBlade$' "$HOME_DIR/.config/kdeglobals" 2>/dev/null; then
+  log "Theme already applied; exiting."
   exit 0
 fi
 
 log "Starting layout application..."
-sleep 5
+for attempt in 1 2 3 4 5; do
+  if pgrep -x plasmashell >/dev/null 2>&1 || command -v qdbus-qt6 >/dev/null 2>&1 || command -v qdbus >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+  log "Waiting for Plasma session ($attempt/5)"
+done
+
+mkdir -p "$HOME_DIR/.config"
+
+cat > "$HOME_DIR/.config/plasma-org.kde.plasma.desktop-appletsrc" <<EOF
+[Containments][1]
+activityId=
+formfactor=2
+immutability=1
+location=1
+plugin=org.kde.plasma.panel
+
+[Containments][1][Applets][1]
+plugin=org.kde.plasma.kickoff
+
+[Containments][1][Applets][2]
+plugin=org.kde.plasma.taskmanager
+
+[Containments][1][Applets][3]
+plugin=org.kde.plasma.systemtray
+
+[Containments][1][Applets][4]
+plugin=org.kde.plasma.digitalclock
+
+[Containments][2]
+activityId=
+formfactor=2
+immutability=1
+location=3
+plugin=org.kde.plasma.panel
+
+[Containments][2][Applets][1]
+plugin=org.kde.plasma.taskmanager
+
+[Containments][2][Applets][2]
+plugin=org.kde.plasma.systemtray
+EOF
 
 if command -v qdbus-qt6 >/dev/null 2>&1; then
   QDBUS="qdbus-qt6"
@@ -479,6 +556,9 @@ apply_theme() {
     kwriteconfig6 --file "$HOME_DIR/.config/kdeglobals" --group General --key WidgetStyle breeze 2>/dev/null || true
     kwriteconfig6 --file "$HOME_DIR/.config/plasmarc" --group Theme --key Theme org.kde.breezedark.desktop 2>/dev/null || true
     kwriteconfig6 --file "$HOME_DIR/.config/plasmashellrc" --group Theme --key Theme org.kde.breezedark.desktop 2>/dev/null || true
+    mkdir -p "$HOME_DIR/.config/gtk-3.0" "$HOME_DIR/.config/gtk-4.0"
+    printf '[Settings]\ngtk-theme-name=Arc-Dark\ngtk-icon-theme-name=UserBlade\ngtk-cursor-theme-name=Breeze_Snow\ngtk-application-prefer-dark-theme=1\n' > "$HOME_DIR/.config/gtk-3.0/settings.ini"
+    printf '[Settings]\ngtk-theme-name=Arc-Dark\ngtk-icon-theme-name=UserBlade\ngtk-cursor-theme-name=Breeze_Snow\ngtk-application-prefer-dark-theme=1\n' > "$HOME_DIR/.config/gtk-4.0/settings.ini"
   fi
 
   if command -v lookandfeeltool >/dev/null 2>&1; then
@@ -492,44 +572,13 @@ apply_theme() {
   fi
 }
 
-apply_layout() {
-  if command -v plasma-apply-layout >/dev/null 2>&1 && [ -f "$LAYOUT" ]; then
-    log "Applying Plasma layout template"
-    plasma-apply-layout "$LAYOUT" 2>/dev/null || return 0
-  fi
-
-  if [ -n "$QDBUS" ]; then
-    log "Applying Plasma layout via DBus fallback"
-    "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
-      (function() {
-        var existingPanels = panels();
-        for (var i = existingPanels.length - 1; i >= 0; i--) {
-          existingPanels[i].remove();
-        }
-
-        var top = new Panel;
-        top.location = 'top';
-        top.addWidget('org.kde.plasma.kickoff');
-        top.addWidget('org.kde.plasma.taskmanager');
-        top.addWidget('org.kde.plasma.systemtray');
-        top.addWidget('org.kde.plasma.digitalclock');
-
-        var right = new Panel;
-        right.location = 'right';
-        right.addWidget('org.kde.plasma.taskmanager');
-        right.addWidget('org.kde.plasma.systemtray');
-      })();
-    " 2>/dev/null || true
-  fi
-}
-
 apply_wallpaper
 apply_theme
-apply_layout
 
 # 4. Rebuild icon cache and refresh GTK theme
 log "Rebuilding icon caches"
 gtk-update-icon-cache -f -t "$HOME_DIR/.local/share/icons" 2>/dev/null || true
+gtk-update-icon-cache -f -t "$HOME_DIR/.local/share/icons/UserBlade" 2>/dev/null || true
 gtk-update-icon-cache -f -t "/usr/share/icons/hicolor" 2>/dev/null || true
 export GTK_THEME=Arc-Dark:dark
 
