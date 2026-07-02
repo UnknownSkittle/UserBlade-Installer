@@ -1,7 +1,6 @@
 #!/bin/bash
 # ============================================================
-# UserBlade Unified Installer (Arc-Dark Plasma Edition)
-# Full Overwrite • Re-runnable • One Script
+# UserBlade Unified Installer (Arc-Dark Plasma • Hard Fallback)
 # ============================================================
 
 set -e
@@ -9,8 +8,10 @@ set -e
 LOG="/var/log/userblade-installer.log"
 exec > >(tee -a "$LOG") 2>&1
 
+log() { echo "[UserBlade] $*"; }
+
 if [ "$(id -u)" -ne 0 ]; then
-  echo "[UserBlade] Run as root: sudo bash userblade-installer.sh"
+  log "Run as root: sudo bash userblade-installer.sh"
   exit 1
 fi
 
@@ -21,13 +22,12 @@ else
 fi
 
 USER_HOME=$(eval echo "~$USER")
-
-echo "[UserBlade] Target user: $USER ($USER_HOME)"
+log "Target user: $USER ($USER_HOME)"
 
 # ------------------------------------------------------------
 # OS Branding
 # ------------------------------------------------------------
-echo "[UserBlade] Applying OS branding..."
+log "Applying OS branding..."
 
 cat <<EOF >/etc/os-release
 NAME="UserBlade"
@@ -47,13 +47,13 @@ echo "UserBlade Linux" >/etc/issue
 # ------------------------------------------------------------
 # System update + base tools
 # ------------------------------------------------------------
-echo "[UserBlade] Updating system..."
+log "Updating system..."
 pacman -Syu --noconfirm
 
-echo "[UserBlade] Installing base tools..."
-pacman -S --noconfirm wget curl git base-devel pciutils xdg-user-dirs
+log "Installing base tools..."
+pacman -S --noconfirm wget curl git base-devel pciutils xdg-user-dirs || log "Base tools: some packages failed, continuing."
 
-sudo -u "$USER" xdg-user-dirs-update
+sudo -u "$USER" xdg-user-dirs-update || log "xdg-user-dirs-update failed, continuing."
 
 # ------------------------------------------------------------
 # Enable multilib
@@ -76,103 +76,138 @@ pacman -Syu --noconfirm
 # Install yay (AUR helper)
 # ------------------------------------------------------------
 if ! command -v yay >/dev/null 2>&1; then
-  sudo -u "$USER" git clone https://aur.archlinux.org/yay.git "$USER_HOME/yay"
-  chown -R "$USER":"$USER" "$USER_HOME/yay"
-  cd "$USER_HOME/yay"
-  sudo -u "$USER" makepkg -si --noconfirm
-  cd "$USER_HOME"
+  log "Installing yay..."
+  sudo -u "$USER" git clone https://aur.archlinux.org/yay.git "$USER_HOME/yay" || log "Failed to clone yay, continuing without AUR."
+  if [ -d "$USER_HOME/yay" ]; then
+    chown -R "$USER":"$USER" "$USER_HOME/yay"
+    cd "$USER_HOME/yay"
+    sudo -u "$USER" makepkg -si --noconfirm || log "Failed to build yay, continuing without AUR."
+    cd "$USER_HOME"
+  fi
 fi
+
+# ------------------------------------------------------------
+# Helper: safe pacman install
+# ------------------------------------------------------------
+safe_pacman() {
+  pacman -S --noconfirm "$@" || log "pacman: failed to install $*, continuing."
+}
+
+safe_yay() {
+  if command -v yay >/dev/null 2>&1; then
+    sudo -u "$USER" yay -S --noconfirm "$@" || log "yay: failed to install $*, continuing."
+  else
+    log "yay not available, skipping AUR package: $*"
+  fi
+}
 
 # ------------------------------------------------------------
 # Install neofetch-git (AUR)
 # ------------------------------------------------------------
-echo "[UserBlade] Installing neofetch-git..."
-sudo -u "$USER" yay -S --noconfirm neofetch-git
+log "Installing neofetch-git..."
+safe_yay neofetch-git
 
 # ------------------------------------------------------------
 # KDE Plasma + SDDM
 # ------------------------------------------------------------
-echo "[UserBlade] Installing KDE Plasma + SDDM..."
-pacman -S --noconfirm plasma-desktop plasma-workspace plasma-systemmonitor \
+log "Installing KDE Plasma + SDDM..."
+safe_pacman plasma-desktop plasma-workspace plasma-systemmonitor \
   konsole dolphin systemsettings sddm sddm-kcm xdg-desktop-portal-kde
 
 # ------------------------------------------------------------
 # Apps (no Steam)
 # ------------------------------------------------------------
-echo "[UserBlade] Installing apps..."
-pacman -S --noconfirm ghex gimp vlc firefox qbittorrent thunderbird cpu-x
+log "Installing apps..."
+safe_pacman ghex gimp vlc firefox qbittorrent thunderbird cpu-x
 
-sudo -u "$USER" yay -S --noconfirm \
-  bauh \
-  bottles \
-  discord \
-  whatsie \
-  visual-studio-code-bin \
-  onlyoffice-bin \
-  opentabletdriver
+safe_yay bauh bottles discord whatsie visual-studio-code-bin onlyoffice-bin opentabletdriver
 
 # ------------------------------------------------------------
 # Audio stack (PipeWire + jack2 kept, pipewire-jack safety)
 # ------------------------------------------------------------
-echo "[UserBlade] Checking for pipewire-jack conflicts..."
-
+log "Checking for pipewire-jack conflicts..."
 if pacman -Q pipewire-jack >/dev/null 2>&1; then
-    echo "[UserBlade] Removing pipewire-jack to prevent JACK conflicts..."
-    pacman -Rns --noconfirm pipewire-jack
+    log "Removing pipewire-jack to prevent JACK conflicts..."
+    pacman -Rns --noconfirm pipewire-jack || log "Failed to remove pipewire-jack, continuing."
 fi
 
-echo "[UserBlade] Installing PipeWire audio stack (jack2 retained)..."
-pacman -S --noconfirm pipewire pipewire-alsa pipewire-pulse wireplumber \
+log "Installing PipeWire audio stack (jack2 retained)..."
+safe_pacman pipewire pipewire-alsa pipewire-pulse wireplumber \
     pavucontrol-qt easyeffects helvum
 
 # ------------------------------------------------------------
 # GPU auto-detect (force overwrite for all drivers)
 # ------------------------------------------------------------
-echo "[UserBlade] Detecting GPU..."
-GPU=$(lspci | grep -i 'vga\|3d\|display' | tr '[:upper:]' '[:lower:]')
+log "Detecting GPU..."
+GPU=$(lspci | grep -i 'vga\|3d\|display' | tr '[:upper:]' '[:lower:]' || echo "")
 
 if echo "$GPU" | grep -q "amd"; then
-    echo "[UserBlade] Installing AMD driver with overwrite..."
-    pacman -S --overwrite '*' --noconfirm xf86-video-amdgpu
+    log "Installing AMD driver with overwrite..."
+    pacman -S --overwrite '*' --noconfirm xf86-video-amdgpu || log "AMD driver failed, falling back to Mesa."
 elif echo "$GPU" | grep -q "intel"; then
-    echo "[UserBlade] Installing Intel driver with overwrite..."
-    pacman -S --overwrite '*' --noconfirm xf86-video-intel
+    log "Installing Intel driver with overwrite..."
+    pacman -S --overwrite '*' --noconfirm xf86-video-intel || log "Intel driver failed, falling back to Mesa."
 elif echo "$GPU" | grep -q "nvidia"; then
-    echo "[UserBlade] Installing NVIDIA driver with overwrite..."
-    pacman -S --overwrite '*' --noconfirm nvidia nvidia-utils || \
-    pacman -S --overwrite '*' --noconfirm xf86-video-nouveau
+    log "Installing NVIDIA driver with overwrite..."
+    pacman -S --overwrite '*' --noconfirm nvidia nvidia-utils || {
+      log "NVIDIA proprietary failed, trying nouveau..."
+      pacman -S --overwrite '*' --noconfirm xf86-video-nouveau || log "NVIDIA drivers failed, falling back to Mesa."
+    }
 else
-    echo "[UserBlade] Unknown GPU, using Mesa."
+    log "Unknown GPU, using Mesa."
 fi
 
 # ------------------------------------------------------------
 # Remove other DEs (safe clean)
 # ------------------------------------------------------------
-echo "[UserBlade] Removing other DEs..."
+log "Removing other DEs..."
 pacman -Rns --noconfirm xfce4 xfce4-goodies gnome gnome-shell lxqt lxqt-session \
   lxde lxde-common cinnamon mate mate-extra budgie-desktop deepin \
-  pantheon-session enlightenment i3-wm openbox 2>/dev/null || true
+  pantheon-session enlightenment i3-wm openbox 2>/dev/null || log "Some DEs not present, continuing."
 
-systemctl disable lightdm gdm lxdm mdm slim 2>/dev/null || true
-pacman -Rns --noconfirm lightdm gdm lxdm mdm slim 2>/dev/null || true
+systemctl disable lightdm gdm lxdm mdm slim 2>/dev/null || log "Some display managers not enabled, continuing."
+pacman -Rns --noconfirm lightdm gdm lxdm mdm slim 2>/dev/null || log "Some display managers not present, continuing."
 
 # ------------------------------------------------------------
 # Wallpaper + icon
 # ------------------------------------------------------------
-echo "[UserBlade] Downloading wallpaper + icon..."
+log "Downloading wallpaper + icon..."
 sudo -u "$USER" mkdir -p "$USER_HOME/Pictures" "$USER_HOME/Icons"
 
-sudo -u "$USER" wget -O "$USER_HOME/Pictures/userblade_wallpaper.jpg" "https://iili.io/C7P8pCg.jpg"
-sudo -u "$USER" wget -O "$USER_HOME/Icons/userblade_icon.png" "https://iili.io/C7ikyhX.png"
+if ! sudo -u "$USER" wget -O "$USER_HOME/Pictures/userblade_wallpaper.jpg" "https://iili.io/C7P8pCg.jpg"; then
+  log "Failed to download wallpaper, using placeholder."
+  touch "$USER_HOME/Pictures/userblade_wallpaper.jpg"
+fi
+
+if ! sudo -u "$USER" wget -O "$USER_HOME/Icons/userblade_icon.png" "https://iili.io/C7ikyhX.png"; then
+  log "Failed to download icon, using placeholder."
+  touch "$USER_HOME/Icons/userblade_icon.png"
+fi
 
 # ------------------------------------------------------------
 # Arc-Dark Plasma Theme (GTK + KDE + Kvantum)
 # ------------------------------------------------------------
-echo "[UserBlade] Installing Arc-Dark Plasma theme..."
+log "Installing Arc-Dark Plasma theme..."
 
-sudo -u "$USER" yay -S --noconfirm arc-gtk-theme-git
+safe_yay arc-gtk-theme-git
 
-pacman -S --noconfirm papirus-icon-theme breeze kvantum
+# Fallback GTK theme if Arc fails
+if ! grep -q "Arc-Dark" "$USER_HOME/.config/gtk-3.0/settings.ini" 2>/dev/null; then
+  log "Arc-Dark GTK may not be present, trying Materia as fallback..."
+  safe_pacman materia-gtk-theme
+fi
+
+safe_pacman papirus-icon-theme breeze
+
+# Kvantum with fallbacks
+log "Installing Kvantum..."
+if ! safe_pacman kvantum; then
+  log "kvantum package failed, trying kvantum-qt5..."
+  safe_pacman kvantum-qt5 || {
+    log "kvantum-qt5 failed, trying kvantum-qt6..."
+    safe_pacman kvantum-qt6 || log "All Kvantum variants failed, skipping Kvantum."
+  }
+fi
 
 mkdir -p "$USER_HOME/.config"
 
@@ -217,7 +252,7 @@ EOF
 # ------------------------------------------------------------
 # Plasma layout + wallpaper
 # ------------------------------------------------------------
-echo "[UserBlade] Creating Plasma layout template..."
+log "Creating Plasma layout template..."
 LAYOUT_DIR="$USER_HOME/.local/share/plasma/layout-templates"
 mkdir -p "$LAYOUT_DIR"
 
@@ -251,7 +286,7 @@ EOF
 # ------------------------------------------------------------
 # Autostart: force layout + wallpaper
 # ------------------------------------------------------------
-echo "[UserBlade] Creating layout + wallpaper autostart..."
+log "Creating layout + wallpaper autostart..."
 mkdir -p "$USER_HOME/.local/bin" "$USER_HOME/.config/autostart"
 
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.local/bin/userblade-apply-layout.sh" >/dev/null
@@ -291,25 +326,34 @@ EOF
 # ------------------------------------------------------------
 # KSplash
 # ------------------------------------------------------------
-echo "[UserBlade] Configuring KSplash..."
+log "Configuring KSplash..."
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/ksplashrc" >/dev/null
 [KSplash]
 Theme=org.kde.breeze
 EOF
 
 # ------------------------------------------------------------
-# Plymouth boot splash
+# Plymouth boot splash (with tribar fallback)
 # ------------------------------------------------------------
-echo "[UserBlade] Installing Plymouth..."
-pacman -S --noconfirm plymouth plymouth-theme-spinner
+log "Installing Plymouth..."
+safe_pacman plymouth
 
-echo "[UserBlade] Creating UserBlade Plymouth theme..."
+if ! safe_pacman plymouth-theme-tribar; then
+  log "plymouth-theme-tribar failed, trying plymouth-theme-bgrt..."
+  safe_pacman plymouth-theme-bgrt || log "All Plymouth themes failed, continuing with base plymouth only."
+fi
+
+log "Creating UserBlade Plymouth theme..."
 PLY_DIR="/usr/share/plymouth/themes/userblade"
 mkdir -p "$PLY_DIR"
 
-cp -r /usr/share/plymouth/themes/spinner/* "$PLY_DIR"
+if [ -d /usr/share/plymouth/themes/tribar ]; then
+  cp -r /usr/share/plymouth/themes/tribar/* "$PLY_DIR"
+elif [ -d /usr/share/plymouth/themes/bgrt ]; then
+  cp -r /usr/share/plymouth/themes/bgrt/* "$PLY_DIR"
+fi
 
-cp "$USER_HOME/Icons/userblade_icon.png" "$PLY_DIR/userblade.png" || true
+cp "$USER_HOME/Icons/userblade_icon.png" "$PLY_DIR/userblade.png" || log "Failed to copy icon to Plymouth theme, continuing."
 
 cat <<EOF > "$PLY_DIR/userblade.plymouth"
 [Plymouth Theme]
@@ -330,15 +374,23 @@ wallpaper_sprite.SetPosition(Screen.Width/2 - wallpaper_image.GetWidth()/2,
                              Screen.Height/2 - wallpaper_image.GetHeight()/2);
 EOF
 
-plymouth-set-default-theme userblade
+if command-v plymouth-set-default-theme >/dev/null 2>&1; then
+  plymouth-set-default-theme userblade || log "Failed to set Plymouth theme, continuing."
+else
+  log "plymouth-set-default-theme not found, skipping theme set."
+fi
 
-echo "[UserBlade] Rebuilding initramfs..."
-mkinitcpio -P
+log "Rebuilding initramfs..."
+if command -v mkinitcpio >/dev/null 2>&1; then
+  mkinitcpio -P || log "mkinitcpio failed, continuing."
+else
+  log "mkinitcpio not found, skipping initramfs rebuild."
+fi
 
 # ------------------------------------------------------------
 # Neofetch ASCII
 # ------------------------------------------------------------
-echo "[UserBlade] Setting custom neofetch ASCII..."
+log "Setting custom neofetch ASCII..."
 NEO_DIR="$USER_HOME/.config/neofetch"
 mkdir -p "$NEO_DIR"
 
@@ -371,7 +423,7 @@ EOF
 # ------------------------------------------------------------
 # Plasma session + SDDM
 # ------------------------------------------------------------
-echo "[UserBlade] Creating Plasma session file..."
+log "Creating Plasma session file..."
 cat <<'EOF' >/usr/share/xsessions/plasma.desktop
 [Desktop Entry]
 Type=XSession
@@ -380,15 +432,14 @@ TryExec=startplasma-x11
 Name=Plasma
 EOF
 
-echo "[UserBlade] Enabling SDDM + graphical target..."
-systemctl enable sddm
-systemctl set-default graphical.target
+log "Enabling SDDM + graphical target..."
+systemctl enable sddm || log "Failed to enable sddm, continuing."
+systemctl set-default graphical.target || log "Failed to set graphical.target, continuing."
 
 # ------------------------------------------------------------
 # Ownership fix
 # ------------------------------------------------------------
-echo "[UserBlade] Fixing ownership..."
-chown -R "$USER":"$USER" "$USER_HOME"
+log "Fixing ownership..."
+chown -R "$USER":"$USER" "$USER_HOME" || log "Failed to fix ownership, continuing."
 
-echo "[UserBlade] Done."
-echo "[UserBlade] Reboot into KDE to activate Arc-Dark Plasma + full UserBlade layout."
+log "Done. Reboot into KDE to activate Arc-Dark Plasma + full UserBlade layout."
