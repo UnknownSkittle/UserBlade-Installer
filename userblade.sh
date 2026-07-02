@@ -98,8 +98,11 @@ pacman -S --noconfirm plasma-desktop plasma-workspace plasma-systemmonitor \
 # ------------------------------------------------------------
 # Apps (Steam, GHex, bauh, etc.)
 # ------------------------------------------------------------
+echo "[UserBlade] Installing Steam..."
+pacman -S --noconfirm steam-native-runtime
+
 echo "[UserBlade] Installing apps..."
-pacman -S --noconfirm steam ghex gimp vlc firefox qbittorrent thunderbird cpu-x
+pacman -S --noconfirm ghex gimp vlc firefox qbittorrent thunderbird cpu-x
 
 sudo -u "$USER" yay -S --noconfirm \
   bauh \
