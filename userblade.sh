@@ -490,7 +490,7 @@ EOF
 chown -R "$USER":"$USER" "$USER_HOME/.local/bin/userblade-apply-layout.sh" "$USER_HOME/.config/autostart"
 
 # Fallback service so the style/layout hook runs reliably after login
-mkdir -p "$USER_HOME/.config/systemd/user"
+sudo -u "$USER" mkdir -p "$USER_HOME/.config/systemd/user"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/systemd/user/userblade-apply-layout.service" >/dev/null
 [Unit]
 Description=UserBlade layout and theme application
