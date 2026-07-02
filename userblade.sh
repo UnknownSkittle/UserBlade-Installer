@@ -1,52 +1,68 @@
 #!/bin/bash
 # ============================================================
-# UserBlade Unified Installer (Full Overwrite Version)
+# UserBlade Unified Installer
+# - One script, full overwrite, re-runnable
 # ============================================================
+
+set -e
 
 LOG="/var/log/userblade-installer.log"
 exec > >(tee -a "$LOG") 2>&1
 
-USER="$SUDO_USER"
+if [ "$(id -u)" -ne 0 ]; then
+  echo "[UserBlade] Run as root: sudo bash userblade-installer.sh"
+  exit 1
+fi
+
+if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+  USER="$SUDO_USER"
+else
+  USER=$(awk -F: '$3 >= 1000 && $3 < 60000 {print $1; exit}' /etc/passwd)
+fi
+
 USER_HOME=$(eval echo "~$USER")
 
-echo "[UserBlade] Starting unified installer..."
+echo "[UserBlade] Target user: $USER ($USER_HOME)"
 
 # ------------------------------------------------------------
-# OS Branding
+# OS Branding (neofetch + system)
 # ------------------------------------------------------------
 echo "[UserBlade] Applying OS branding..."
-cat <<EOF | sudo tee /etc/os-release >/dev/null
+
+cat <<EOF >/etc/os-release
 NAME="UserBlade"
 PRETTY_NAME="UserBlade Linux"
 ID=userblade
 ID_LIKE=arch
 EOF
 
-cat <<EOF | sudo tee /etc/lsb-release >/dev/null
+cat <<EOF >/etc/lsb-release
 DISTRIB_ID=UserBlade
 DISTRIB_RELEASE=1.0
 DISTRIB_DESCRIPTION="UserBlade Linux"
 EOF
 
-echo "UserBlade Linux" | sudo tee /etc/issue >/dev/null
+echo "UserBlade Linux" >/etc/issue
 
 # ------------------------------------------------------------
-# System Update + Tools
+# System update + base tools
 # ------------------------------------------------------------
+echo "[UserBlade] Updating system..."
 pacman -Syu --noconfirm
-pacman -S --noconfirm wget curl git base-devel pciutils xdg-user-dirs
+
+echo "[UserBlade] Installing base tools..."
+pacman -S --noconfirm wget curl git base-devel pciutils xdg-user-dirs neofetch
 
 sudo -u "$USER" xdg-user-dirs-update
 
 # ------------------------------------------------------------
-# Enable Multilib
+# Enable multilib
 # ------------------------------------------------------------
 if ! grep -q "^
 
 \[multilib\]
 
 " /etc/pacman.conf; then
-  echo "[UserBlade] Enabling multilib..."
   cat <<EOF >> /etc/pacman.conf
 
 [multilib]
@@ -57,17 +73,26 @@ fi
 pacman -Syu --noconfirm
 
 # ------------------------------------------------------------
-# Install KDE Plasma + SDDM
+# KDE Plasma + SDDM
 # ------------------------------------------------------------
-echo "[UserBlade] Installing KDE Plasma..."
+echo "[UserBlade] Installing KDE Plasma + SDDM..."
 pacman -S --noconfirm plasma-desktop plasma-workspace plasma-systemmonitor \
   konsole dolphin systemsettings sddm sddm-kcm xdg-desktop-portal-kde
 
 # ------------------------------------------------------------
-# Install Apps
+# Apps (bauh, Steam, GHex, etc.)
 # ------------------------------------------------------------
 echo "[UserBlade] Installing apps..."
 pacman -S --noconfirm steam ghex gimp vlc firefox qbittorrent thunderbird cpu-x
+
+# yay (AUR helper)
+if ! command -v yay >/dev/null 2>&1; then
+  sudo -u "$USER" git clone https://aur.archlinux.org/yay.git "$USER_HOME/yay"
+  chown -R "$USER":"$USER" "$USER_HOME/yay"
+  cd "$USER_HOME/yay"
+  sudo -u "$USER" makepkg -si --noconfirm
+  cd "$USER_HOME"
+fi
 
 sudo -u "$USER" yay -S --noconfirm \
   bauh \
@@ -79,14 +104,16 @@ sudo -u "$USER" yay -S --noconfirm \
   opentabletdriver
 
 # ------------------------------------------------------------
-# Install Audio Stack
+# Audio stack (PipeWire)
 # ------------------------------------------------------------
+echo "[UserBlade] Installing PipeWire audio stack..."
 pacman -S --noconfirm pipewire pipewire-alsa pipewire-pulse pipewire-jack \
   wireplumber pavucontrol-qt easyeffects helvum
 
 # ------------------------------------------------------------
-# GPU Auto-Detect
+# GPU auto-detect
 # ------------------------------------------------------------
+echo "[UserBlade] Detecting GPU..."
 GPU=$(lspci | grep -i 'vga\|3d\|display' | tr '[:upper:]' '[:lower:]')
 
 if echo "$GPU" | grep -q "amd"; then
@@ -104,28 +131,34 @@ else
 fi
 
 # ------------------------------------------------------------
-# Remove Other DEs (Safe Clean)
+# Remove other DEs (safe clean)
 # ------------------------------------------------------------
 echo "[UserBlade] Removing other DEs..."
 pacman -Rns --noconfirm xfce4 xfce4-goodies gnome gnome-shell lxqt lxqt-session \
   lxde lxde-common cinnamon mate mate-extra budgie-desktop deepin \
-  pantheon-session enlightenment i3-wm openbox 2>/dev/null
+  pantheon-session enlightenment i3-wm openbox 2>/dev/null || true
 
-systemctl disable lightdm gdm lxdm mdm slim 2>/dev/null
-pacman -Rns --noconfirm lightdm gdm lxdm mdm slim 2>/dev/null
+systemctl disable lightdm gdm lxdm mdm slim 2>/dev/null || true
+pacman -Rns --noconfirm lightdm gdm lxdm mdm slim 2>/dev/null || true
 
 # ------------------------------------------------------------
-# Wallpaper + Icon
+# Wallpaper + icon (your links)
 # ------------------------------------------------------------
+echo "[UserBlade] Downloading wallpaper + icon..."
 sudo -u "$USER" mkdir -p "$USER_HOME/Pictures" "$USER_HOME/Icons"
 
 sudo -u "$USER" wget -O "$USER_HOME/Pictures/userblade_wallpaper.jpg" "https://iili.io/C7P8pCg.jpg"
 sudo -u "$USER" wget -O "$USER_HOME/Icons/userblade_icon.png" "https://iili.io/C7ikyhX.png"
 
 # ------------------------------------------------------------
-# KDE Theme Injection (Full Overwrite)
+# Theme: Arc Dark + Papirus + Breeze Snow
 # ------------------------------------------------------------
-echo "[UserBlade] Applying theme..."
+echo "[UserBlade] Installing theme components..."
+pacman -S --noconfirm arc-gtk-theme papirus-icon-theme breeze
+
+# KDE theme injection
+echo "[UserBlade] Applying KDE theme..."
+mkdir -p "$USER_HOME/.config"
 
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/kdeglobals" >/dev/null
 [General]
@@ -156,10 +189,9 @@ gtk-cursor-theme-name=Breeze_Snow
 EOF
 
 # ------------------------------------------------------------
-# KDE Layout (Right Dock + Top Bar)
+# Plasma layout (right dock + top bar) + wallpaper
 # ------------------------------------------------------------
-echo "[UserBlade] Applying layout..."
-
+echo "[UserBlade] Applying Plasma layout..."
 LAYOUT_DIR="$USER_HOME/.local/share/plasma/layout-templates"
 mkdir -p "$LAYOUT_DIR"
 
@@ -190,21 +222,145 @@ plugin=org.kde.plasma.appmenu
 plugin=org.kde.plasma.systemtray
 EOF
 
-sudo -u "$USER" plasma-apply-layout "$LAYOUT_DIR/userblade.layout.lay"
+# ------------------------------------------------------------
+# Force apply layout + wallpaper via autostart script
+# ------------------------------------------------------------
+echo "[UserBlade] Creating layout autostart..."
+mkdir -p "$USER_HOME/.local/bin" "$USER_HOME/.config/autostart"
 
-# ------------------------------------------------------------
-# SDDM Theme
-# ------------------------------------------------------------
-mkdir -p /etc/sddm.conf.d
-cat <<EOF | sudo tee /etc/sddm.conf.d/theme.conf >/dev/null
-[Theme]
-Current=breeze
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.local/bin/userblade-apply-layout.sh" >/dev/null
+#!/bin/bash
+LAYOUT="\$HOME/.local/share/plasma/layout-templates/userblade.layout.lay"
+if command -v plasma-apply-layout >/dev/null 2>&1; then
+  plasma-apply-layout "\$LAYOUT"
+fi
+
+# Force wallpaper via qdbus if available
+if command -v qdbus >/dev/null 2>&1; then
+  qdbus org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
+    var allDesktops = desktops();
+    for (var i=0;i<allDesktops.length;i++) {
+      d = allDesktops[i];
+      d.wallpaperPlugin = 'org.kde.image';
+      d.currentConfigGroup = Array('Wallpaper', 'org.kde.image', 'General');
+      d.writeConfig('Image', 'file://$HOME/Pictures/userblade_wallpaper.jpg');
+    }
+  "
+fi
+EOF
+
+sudo -u "$USER" chmod +x "$USER_HOME/.local/bin/userblade-apply-layout.sh"
+
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart/userblade-apply-layout.desktop" >/dev/null
+[Desktop Entry]
+Type=Application
+Exec=$HOME/.local/bin/userblade-apply-layout.sh
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=UserBlade Layout
+Comment=Force apply UserBlade layout + wallpaper
 EOF
 
 # ------------------------------------------------------------
-# Plasma Session File
+# Replace KDE launcher icon (Kickoff) via Plasma config
 # ------------------------------------------------------------
-cat <<EOF | sudo tee /usr/share/xsessions/plasma.desktop >/dev/null
+echo "[UserBlade] Patching Plasma applet config for launcher icon..."
+PLASMA_CFG="$USER_HOME/.config/plasma-org.kde.plasma.desktop-appletsrc"
+if [ -f "$PLASMA_CFG" ]; then
+  sudo -u "$USER" sed -i "s|favoriteApps=.*|favoriteApps=systemsettings,org.kde.dolphin,org.kde.konsole|g" "$PLASMA_CFG" || true
+fi
+
+# ------------------------------------------------------------
+# KSplash (KDE startup) using Breeze + your icon
+# ------------------------------------------------------------
+echo "[UserBlade] Configuring KSplash..."
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/ksplashrc" >/dev/null
+[KSplash]
+Theme=org.kde.breeze
+EOF
+
+# ------------------------------------------------------------
+# Plymouth (boot splash) with static logo
+# ------------------------------------------------------------
+echo "[UserBlade] Installing Plymouth..."
+pacman -S --noconfirm plymouth plymouth-theme-spinner
+
+echo "[UserBlade] Creating UserBlade Plymouth theme..."
+PLY_DIR="/usr/share/plymouth/themes/userblade"
+mkdir -p "$PLY_DIR"
+
+# Copy spinner theme as base
+cp -r /usr/share/plymouth/themes/spinner/* "$PLY_DIR"
+
+# Replace image with your icon
+cp "$USER_HOME/Icons/userblade_icon.png" "$PLY_DIR/userblade.png" || true
+
+cat <<EOF > "$PLY_DIR/userblade.plymouth"
+[Plymouth Theme]
+Name=UserBlade
+Description=UserBlade static logo
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/userblade
+ScriptFile=/usr/share/plymouth/themes/userblade/userblade.script
+EOF
+
+cat <<'EOF' > "$PLY_DIR/userblade.script"
+wallpaper_image = Image("userblade.png");
+wallpaper_sprite = Sprite(wallpaper_image);
+wallpaper_sprite.SetZ(100);
+wallpaper_sprite.SetPosition(Screen.Width/2 - wallpaper_image.GetWidth()/2,
+                             Screen.Height/2 - wallpaper_image.GetHeight()/2);
+EOF
+
+# Set Plymouth theme
+plymouth-set-default-theme userblade
+
+# Rebuild initramfs
+echo "[UserBlade] Rebuilding initramfs for Plymouth..."
+if command -v mkinitcpio >/dev/null 2>&1; then
+  mkinitcpio -P
+fi
+
+# ------------------------------------------------------------
+# Neofetch ASCII (BlackArch-style, purple, sword)
+# ------------------------------------------------------------
+echo "[UserBlade] Setting custom neofetch ASCII..."
+NEO_DIR="$USER_HOME/.config/neofetch"
+mkdir -p "$NEO_DIR"
+
+cat <<'EOF' > "$NEO_DIR/ascii"
+          /\               
+         /  \              
+        /\   \             
+       /  \   \            
+      / /\ \   \           
+     / /  \ \   \          
+    / /    \ \   \         
+   /_/      \_\   \        
+    \ \      / /   /       
+     \ \    / /   /        
+      \ \  / /   /         
+       \ \/ /   /          
+        \  /   /           
+         \/   /            
+        USERBLADE          
+   PURPLE BLACKARCH + SWORD
+EOF
+
+cat <<EOF > "$NEO_DIR/config.conf"
+ascii_distro="ascii"
+ascii_file="$HOME/.config/neofetch/ascii"
+color_blocks="on"
+EOF
+
+# ------------------------------------------------------------
+# Plasma session + SDDM
+# ------------------------------------------------------------
+echo "[UserBlade] Creating Plasma session file..."
+cat <<'EOF' >/usr/share/xsessions/plasma.desktop
 [Desktop Entry]
 Type=XSession
 Exec=startplasma-x11
@@ -212,16 +368,17 @@ TryExec=startplasma-x11
 Name=Plasma
 EOF
 
-# ------------------------------------------------------------
-# Enable SDDM + Graphical Target
-# ------------------------------------------------------------
+echo "[UserBlade] Enabling SDDM + graphical target..."
 systemctl enable sddm
 systemctl set-default graphical.target
 
 # ------------------------------------------------------------
-# Fix Ownership
+# Ownership fix
 # ------------------------------------------------------------
+echo "[UserBlade] Fixing ownership..."
 chown -R "$USER":"$USER" "$USER_HOME"
 
-echo "[UserBlade] Installation complete!"
-echo "[UserBlade] Reboot to enter full UserBlade KDE."
+echo "[UserBlade] Done."
+echo "[UserBlade] Reboot, log into KDE, and the autostart will force layout + wallpaper."
+echo "[UserBlade] Neofetch will show UserBlade + custom ASCII."
+echo "[UserBlade] Plymouth will show your icon during boot."
