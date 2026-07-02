@@ -96,11 +96,8 @@ pacman -S --noconfirm plasma-desktop plasma-workspace plasma-systemmonitor \
   konsole dolphin systemsettings sddm sddm-kcm xdg-desktop-portal-kde
 
 # ------------------------------------------------------------
-# Apps (Steam, GHex, bauh, etc.)
+# Apps (no Steam, keep gaming libs)
 # ------------------------------------------------------------
-echo "[UserBlade] Installing Steam..."
-pacman -S --noconfirm steam-native-runtime
-
 echo "[UserBlade] Installing apps..."
 pacman -S --noconfirm ghex gimp vlc firefox qbittorrent thunderbird cpu-x
 
