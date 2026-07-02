@@ -1,7 +1,6 @@
 #!/bin/bash
 # ============================================================
-# UserBlade Unified Installer
-# - One script, full overwrite, re-runnable
+# UserBlade Unified Installer (Full Overwrite, Re-runnable)
 # ============================================================
 
 set -e
@@ -25,7 +24,7 @@ USER_HOME=$(eval echo "~$USER")
 echo "[UserBlade] Target user: $USER ($USER_HOME)"
 
 # ------------------------------------------------------------
-# OS Branding (neofetch + system)
+# OS Branding
 # ------------------------------------------------------------
 echo "[UserBlade] Applying OS branding..."
 
@@ -51,7 +50,7 @@ echo "[UserBlade] Updating system..."
 pacman -Syu --noconfirm
 
 echo "[UserBlade] Installing base tools..."
-pacman -S --noconfirm wget curl git base-devel pciutils xdg-user-dirs neofetch
+pacman -S --noconfirm wget curl git base-devel pciutils xdg-user-dirs
 
 sudo -u "$USER" xdg-user-dirs-update
 
@@ -73,19 +72,8 @@ fi
 pacman -Syu --noconfirm
 
 # ------------------------------------------------------------
-# KDE Plasma + SDDM
+# Install yay (AUR helper)
 # ------------------------------------------------------------
-echo "[UserBlade] Installing KDE Plasma + SDDM..."
-pacman -S --noconfirm plasma-desktop plasma-workspace plasma-systemmonitor \
-  konsole dolphin systemsettings sddm sddm-kcm xdg-desktop-portal-kde
-
-# ------------------------------------------------------------
-# Apps (bauh, Steam, GHex, etc.)
-# ------------------------------------------------------------
-echo "[UserBlade] Installing apps..."
-pacman -S --noconfirm steam ghex gimp vlc firefox qbittorrent thunderbird cpu-x
-
-# yay (AUR helper)
 if ! command -v yay >/dev/null 2>&1; then
   sudo -u "$USER" git clone https://aur.archlinux.org/yay.git "$USER_HOME/yay"
   chown -R "$USER":"$USER" "$USER_HOME/yay"
@@ -93,6 +81,25 @@ if ! command -v yay >/dev/null 2>&1; then
   sudo -u "$USER" makepkg -si --noconfirm
   cd "$USER_HOME"
 fi
+
+# ------------------------------------------------------------
+# Install neofetch-git (AUR)
+# ------------------------------------------------------------
+echo "[UserBlade] Installing neofetch-git..."
+sudo -u "$USER" yay -S --noconfirm neofetch-git
+
+# ------------------------------------------------------------
+# KDE Plasma + SDDM
+# ------------------------------------------------------------
+echo "[UserBlade] Installing KDE Plasma + SDDM..."
+pacman -S --noconfirm plasma-desktop plasma-workspace plasma-systemmonitor \
+  konsole dolphin systemsettings sddm sddm-kcm xdg-desktop-portal-kde
+
+# ------------------------------------------------------------
+# Apps (Steam, GHex, bauh, etc.)
+# ------------------------------------------------------------
+echo "[UserBlade] Installing apps..."
+pacman -S --noconfirm steam ghex gimp vlc firefox qbittorrent thunderbird cpu-x
 
 sudo -u "$USER" yay -S --noconfirm \
   bauh \
@@ -142,7 +149,7 @@ systemctl disable lightdm gdm lxdm mdm slim 2>/dev/null || true
 pacman -Rns --noconfirm lightdm gdm lxdm mdm slim 2>/dev/null || true
 
 # ------------------------------------------------------------
-# Wallpaper + icon (your links)
+# Wallpaper + icon (your PNG + wallpaper)
 # ------------------------------------------------------------
 echo "[UserBlade] Downloading wallpaper + icon..."
 sudo -u "$USER" mkdir -p "$USER_HOME/Pictures" "$USER_HOME/Icons"
@@ -156,8 +163,7 @@ sudo -u "$USER" wget -O "$USER_HOME/Icons/userblade_icon.png" "https://iili.io/C
 echo "[UserBlade] Installing theme components..."
 pacman -S --noconfirm arc-gtk-theme papirus-icon-theme breeze
 
-# KDE theme injection
-echo "[UserBlade] Applying KDE theme..."
+echo "[UserBlade] Applying KDE + GTK theme..."
 mkdir -p "$USER_HOME/.config"
 
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/kdeglobals" >/dev/null
@@ -191,7 +197,7 @@ EOF
 # ------------------------------------------------------------
 # Plasma layout (right dock + top bar) + wallpaper
 # ------------------------------------------------------------
-echo "[UserBlade] Applying Plasma layout..."
+echo "[UserBlade] Creating Plasma layout template..."
 LAYOUT_DIR="$USER_HOME/.local/share/plasma/layout-templates"
 mkdir -p "$LAYOUT_DIR"
 
@@ -205,7 +211,7 @@ location=0
 wallpaperplugin=org.kde.image
 
 [Containments][1][Wallpaper][org.kde.image][General]
-Image=file://$USER_HOME/Pictures/userblade_wallpaper.jpg
+Image=file://$HOME/Pictures/userblade_wallpaper.jpg
 
 [Containments][2]
 plugin=org.kde.plasma.panel
@@ -223,19 +229,19 @@ plugin=org.kde.plasma.systemtray
 EOF
 
 # ------------------------------------------------------------
-# Force apply layout + wallpaper via autostart script
+# Autostart: force layout + wallpaper on login
 # ------------------------------------------------------------
-echo "[UserBlade] Creating layout autostart..."
+echo "[UserBlade] Creating layout + wallpaper autostart..."
 mkdir -p "$USER_HOME/.local/bin" "$USER_HOME/.config/autostart"
 
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.local/bin/userblade-apply-layout.sh" >/dev/null
 #!/bin/bash
 LAYOUT="\$HOME/.local/share/plasma/layout-templates/userblade.layout.lay"
+
 if command -v plasma-apply-layout >/dev/null 2>&1; then
   plasma-apply-layout "\$LAYOUT"
 fi
 
-# Force wallpaper via qdbus if available
 if command -v qdbus >/dev/null 2>&1; then
   qdbus org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
     var allDesktops = desktops();
@@ -263,16 +269,7 @@ Comment=Force apply UserBlade layout + wallpaper
 EOF
 
 # ------------------------------------------------------------
-# Replace KDE launcher icon (Kickoff) via Plasma config
-# ------------------------------------------------------------
-echo "[UserBlade] Patching Plasma applet config for launcher icon..."
-PLASMA_CFG="$USER_HOME/.config/plasma-org.kde.plasma.desktop-appletsrc"
-if [ -f "$PLASMA_CFG" ]; then
-  sudo -u "$USER" sed -i "s|favoriteApps=.*|favoriteApps=systemsettings,org.kde.dolphin,org.kde.konsole|g" "$PLASMA_CFG" || true
-fi
-
-# ------------------------------------------------------------
-# KSplash (KDE startup) using Breeze + your icon
+# KSplash (KDE startup) using Breeze
 # ------------------------------------------------------------
 echo "[UserBlade] Configuring KSplash..."
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/ksplashrc" >/dev/null
@@ -281,7 +278,7 @@ Theme=org.kde.breeze
 EOF
 
 # ------------------------------------------------------------
-# Plymouth (boot splash) with static logo
+# Plymouth (boot splash) with static logo (your PNG)
 # ------------------------------------------------------------
 echo "[UserBlade] Installing Plymouth..."
 pacman -S --noconfirm plymouth plymouth-theme-spinner
@@ -290,10 +287,8 @@ echo "[UserBlade] Creating UserBlade Plymouth theme..."
 PLY_DIR="/usr/share/plymouth/themes/userblade"
 mkdir -p "$PLY_DIR"
 
-# Copy spinner theme as base
 cp -r /usr/share/plymouth/themes/spinner/* "$PLY_DIR"
 
-# Replace image with your icon
 cp "$USER_HOME/Icons/userblade_icon.png" "$PLY_DIR/userblade.png" || true
 
 cat <<EOF > "$PLY_DIR/userblade.plymouth"
@@ -315,10 +310,8 @@ wallpaper_sprite.SetPosition(Screen.Width/2 - wallpaper_image.GetWidth()/2,
                              Screen.Height/2 - wallpaper_image.GetHeight()/2);
 EOF
 
-# Set Plymouth theme
 plymouth-set-default-theme userblade
 
-# Rebuild initramfs
 echo "[UserBlade] Rebuilding initramfs for Plymouth..."
 if command -v mkinitcpio >/dev/null 2>&1; then
   mkinitcpio -P
@@ -332,22 +325,23 @@ NEO_DIR="$USER_HOME/.config/neofetch"
 mkdir -p "$NEO_DIR"
 
 cat <<'EOF' > "$NEO_DIR/ascii"
-          /\               
-         /  \              
-        /\   \             
-       /  \   \            
-      / /\ \   \           
-     / /  \ \   \          
-    / /    \ \   \         
-   /_/      \_\   \        
-    \ \      / /   /       
-     \ \    / /   /        
-      \ \  / /   /         
-       \ \/ /   /          
-        \  /   /           
-         \/   /            
-        USERBLADE          
-   PURPLE BLACKARCH + SWORD
+                 /\
+                /  \
+               / /\ \
+              / /  \ \
+     /\      / /    \ \
+    /  \    / /  /\  \ \
+   / /\ \  / /  /  \  \ \
+  / /  \ \/ /  / /\ \  \ \
+ / /    \  /  / /  \ \  \ \
+/_/      \/__/ /    \_\  \ \
+\ \      /  \_\      / /  / /
+ \ \    / /\  \     / /  / /
+  \ \  / /  \  \   / /  / /
+   \ \/ /    \  \_/ /  / /
+    \  /      \____/  / /
+     \/        USERBLADE
+        PURPLE BLACKARCH + SWORD
 EOF
 
 cat <<EOF > "$NEO_DIR/config.conf"
@@ -381,4 +375,4 @@ chown -R "$USER":"$USER" "$USER_HOME"
 echo "[UserBlade] Done."
 echo "[UserBlade] Reboot, log into KDE, and the autostart will force layout + wallpaper."
 echo "[UserBlade] Neofetch will show UserBlade + custom ASCII."
-echo "[UserBlade] Plymouth will show your icon during boot."
+echo "[UserBlade] Plymouth will show your PNG icon during boot."
