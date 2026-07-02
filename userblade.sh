@@ -111,7 +111,7 @@ sudo -u "$USER" yay -S --noconfirm \
   opentabletdriver
 
 # ------------------------------------------------------------
-# Audio stack (PipeWire + jack2 kept)
+# Audio stack (PipeWire + jack2 kept, pipewire-jack safety)
 # ------------------------------------------------------------
 echo "[UserBlade] Checking for pipewire-jack conflicts..."
 
@@ -125,23 +125,23 @@ pacman -S --noconfirm pipewire pipewire-alsa pipewire-pulse wireplumber \
     pavucontrol-qt easyeffects helvum
 
 # ------------------------------------------------------------
-# GPU auto-detect
+# GPU auto-detect (force overwrite for all drivers)
 # ------------------------------------------------------------
 echo "[UserBlade] Detecting GPU..."
 GPU=$(lspci | grep -i 'vga\|3d\|display' | tr '[:upper:]' '[:lower:]')
 
 if echo "$GPU" | grep -q "amd"; then
-  pacman -S --noconfirm xf86-video-amdgpu
+    echo "[UserBlade] Installing AMD driver with overwrite..."
+    pacman -S --overwrite '*' --noconfirm xf86-video-amdgpu
 elif echo "$GPU" | grep -q "intel"; then
-  pacman -S --noconfirm xf86-video-intel
+    echo "[UserBlade] Installing Intel driver with overwrite..."
+    pacman -S --overwrite '*' --noconfirm xf86-video-intel
 elif echo "$GPU" | grep -q "nvidia"; then
-  if pacman -S --noconfirm nvidia nvidia-utils; then
-    echo "[UserBlade] NVIDIA proprietary installed."
-  else
-    pacman -S --noconfirm xf86-video-nouveau
-  fi
+    echo "[UserBlade] Installing NVIDIA driver with overwrite..."
+    pacman -S --overwrite '*' --noconfirm nvidia nvidia-utils || \
+    pacman -S --overwrite '*' --noconfirm xf86-video-nouveau
 else
-  echo "[UserBlade] Unknown GPU, using Mesa."
+    echo "[UserBlade] Unknown GPU, using Mesa."
 fi
 
 # ------------------------------------------------------------
