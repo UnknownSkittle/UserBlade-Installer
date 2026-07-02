@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# UserBlade Unified Installer (Arc-Dark Plasma • Hard Fallback)
+# UserBlade Unified Installer (Arc-Dark Plasma • Fixed Apply)
 # ============================================================
 
 set -e
@@ -10,6 +10,9 @@ exec > >(tee -a "$LOG") 2>&1
 
 log() { echo "[UserBlade] $*"; }
 
+# ------------------------------------------------------------
+# Root + user detection
+# ------------------------------------------------------------
 if [ "$(id -u)" -ne 0 ]; then
   log "Run as root: sudo bash userblade-installer.sh"
   exit 1
@@ -23,6 +26,21 @@ fi
 
 USER_HOME=$(eval echo "~$USER")
 log "Target user: $USER ($USER_HOME)"
+
+# ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
+safe_pacman() {
+  pacman -S --noconfirm "$@" || log "pacman: failed to install $*, continuing."
+}
+
+safe_yay() {
+  if command -v yay >/dev/null 2>&1; then
+    sudo -u "$USER" yay -S --noconfirm "$@" || log "yay: failed to install $*, continuing."
+  else
+    log "yay not available, skipping AUR package: $*"
+  fi
+}
 
 # ------------------------------------------------------------
 # OS Branding
@@ -51,7 +69,7 @@ log "Updating system..."
 pacman -Syu --noconfirm
 
 log "Installing base tools..."
-pacman -S --noconfirm wget curl git base-devel pciutils xdg-user-dirs || log "Base tools: some packages failed, continuing."
+safe_pacman wget curl git base-devel pciutils xdg-user-dirs
 
 sudo -u "$USER" xdg-user-dirs-update || log "xdg-user-dirs-update failed, continuing."
 
@@ -87,22 +105,7 @@ if ! command -v yay >/dev/null 2>&1; then
 fi
 
 # ------------------------------------------------------------
-# Helper: safe pacman install
-# ------------------------------------------------------------
-safe_pacman() {
-  pacman -S --noconfirm "$@" || log "pacman: failed to install $*, continuing."
-}
-
-safe_yay() {
-  if command -v yay >/dev/null 2>&1; then
-    sudo -u "$USER" yay -S --noconfirm "$@" || log "yay: failed to install $*, continuing."
-  else
-    log "yay not available, skipping AUR package: $*"
-  fi
-}
-
-# ------------------------------------------------------------
-# Install neofetch-git (AUR)
+# neofetch-git (AUR)
 # ------------------------------------------------------------
 log "Installing neofetch-git..."
 safe_yay neofetch-git
@@ -192,14 +195,8 @@ log "Installing Arc-Dark Plasma theme..."
 safe_yay arc-gtk-theme-git
 
 # Fallback GTK theme if Arc fails
-if ! grep -q "Arc-Dark" "$USER_HOME/.config/gtk-3.0/settings.ini" 2>/dev/null; then
-  log "Arc-Dark GTK may not be present, trying Materia as fallback..."
-  safe_pacman materia-gtk-theme
-fi
-
 safe_pacman papirus-icon-theme breeze
 
-# Kvantum with fallbacks
 log "Installing Kvantum..."
 if ! safe_pacman kvantum; then
   log "kvantum package failed, trying kvantum-qt5..."
@@ -211,7 +208,7 @@ fi
 
 mkdir -p "$USER_HOME/.config"
 
-# KDE globals
+# KDE globals (force Papirus + Breeze Snow)
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/kdeglobals" >/dev/null
 [General]
 ColorScheme=Arc-Dark-Plasma
@@ -284,20 +281,24 @@ plugin=org.kde.plasma.systemtray
 EOF
 
 # ------------------------------------------------------------
-# Autostart: force layout + wallpaper
+# Autostart: force layout + wallpaper + theme apply
 # ------------------------------------------------------------
-log "Creating layout + wallpaper autostart..."
+log "Creating layout + wallpaper + theme autostart..."
 mkdir -p "$USER_HOME/.local/bin" "$USER_HOME/.config/autostart"
 
-cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.local/bin/userblade-apply-layout.sh" >/dev/null
+cat <<'EOF' | sudo -u "$USER" tee "$USER_HOME/.local/bin/userblade-apply-layout.sh" >/dev/null
 #!/bin/bash
-LAYOUT="\$HOME/.local/share/plasma/layout-templates/userblade.layout.lay"
 
-if command -v plasma-apply-layout >/dev/null 2>&1; then
-  plasma-apply-layout "\$LAYOUT"
+LAYOUT="$HOME/.local/share/plasma/layout-templates/userblade.layout.lay"
+WALLPAPER="$HOME/Pictures/userblade_wallpaper.jpg"
+
+# Apply layout if available
+if command -v plasma-apply-layout >/dev/null 2>&1 && [ -f "$LAYOUT" ]; then
+  plasma-apply-layout "$LAYOUT"
 fi
 
-if command -v qdbus >/dev/null 2>&1; then
+# Force wallpaper via DBus
+if command -v qdbus >/dev/null 2>&1 && [ -f "$WALLPAPER" ]; then
   qdbus org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
     var allDesktops = desktops();
     for (var i=0;i<allDesktops.length;i++) {
@@ -307,6 +308,20 @@ if command -v qdbus >/dev/null 2>&1; then
       d.writeConfig('Image', 'file://$HOME/Pictures/userblade_wallpaper.jpg');
     }
   "
+fi
+
+# Force icon + theme
+if command -v lookandfeeltool >/dev/null 2>&1; then
+  lookandfeeltool -a org.kde.breezedark.desktop
+fi
+
+if command -v kvantummanager >/dev/null 2>&1; then
+  kvantummanager --set Arc-Dark-Plasma
+fi
+
+# Force icon theme to Papirus-Dark
+if command -v kcmshell6 >/dev/null 2>&1; then
+  kcmshell6 icons --args="--icon-theme Papirus-Dark"
 fi
 EOF
 
@@ -320,7 +335,7 @@ Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
 Name=UserBlade Layout
-Comment=Force apply UserBlade layout + wallpaper
+Comment=Force apply UserBlade layout + wallpaper + theme
 EOF
 
 # ------------------------------------------------------------
@@ -333,7 +348,7 @@ Theme=org.kde.breeze
 EOF
 
 # ------------------------------------------------------------
-# Plymouth boot splash (with tribar fallback)
+# Plymouth boot splash (tribar fallback)
 # ------------------------------------------------------------
 log "Installing Plymouth..."
 safe_pacman plymouth
@@ -374,7 +389,7 @@ wallpaper_sprite.SetPosition(Screen.Width/2 - wallpaper_image.GetWidth()/2,
                              Screen.Height/2 - wallpaper_image.GetHeight()/2);
 EOF
 
-if command-v plymouth-set-default-theme >/dev/null 2>&1; then
+if command -v plymouth-set-default-theme >/dev/null 2>&1; then
   plymouth-set-default-theme userblade || log "Failed to set Plymouth theme, continuing."
 else
   log "plymouth-set-default-theme not found, skipping theme set."
@@ -442,4 +457,4 @@ systemctl set-default graphical.target || log "Failed to set graphical.target, c
 log "Fixing ownership..."
 chown -R "$USER":"$USER" "$USER_HOME" || log "Failed to fix ownership, continuing."
 
-log "Done. Reboot into KDE to activate Arc-Dark Plasma + full UserBlade layout."
+log "Done. Reboot into KDE; first login will apply layout, wallpaper, Arc-Dark Plasma, Papirus icons, and Kvantum."
