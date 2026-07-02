@@ -111,11 +111,14 @@ sudo -u "$USER" yay -S --noconfirm \
   opentabletdriver
 
 # ------------------------------------------------------------
-# Audio stack (PipeWire)
+# Audio stack (PipeWire, full jack2 purge)
 # ------------------------------------------------------------
 echo "[UserBlade] Installing PipeWire audio stack..."
 pacman -S --noconfirm pipewire pipewire-alsa pipewire-pulse pipewire-jack \
   wireplumber pavucontrol-qt easyeffects helvum
+
+echo "[UserBlade] Removing jack2 and related packages..."
+pacman -Rns --noconfirm jack2 jack2-dbus jack2-tools jack2-libs 2>/dev/null || true
 
 # ------------------------------------------------------------
 # GPU auto-detect
