@@ -63,7 +63,11 @@ download_image() {
 rebuild_icon_cache() {
   log "Rebuilding icon caches..."
   sudo -u "$USER" gtk-update-icon-cache -f -t "$USER_HOME/.local/share/icons" 2>/dev/null || true
+  sudo -u "$USER" gtk-update-icon-cache -f -t "$USER_HOME/.local/share/icons/UserBlade" 2>/dev/null || true
   sudo -u "$USER" gtk-update-icon-cache -f -t "/usr/share/icons/hicolor" 2>/dev/null || true
+  if command -v kbuildsycoca5 >/dev/null 2>&1; then
+    sudo -u "$USER" kbuildsycoca5 --noincremental >/dev/null 2>&1 || true
+  fi
   if command -v update-mime-database >/dev/null 2>&1; then
     update-mime-database /usr/share/mime 2>/dev/null || true
   fi
@@ -207,12 +211,37 @@ download_image "$ICON_URL" "$USER_HOME/Icons/userblade_icon.png"
 # Create cache directory
 sudo -u "$USER" mkdir -p "$USER_HOME/.cache/userblade"
 
+# Custom UserBlade icon theme
+ICON_THEME_DIR="$USER_HOME/.local/share/icons/UserBlade"
+sudo -u "$USER" mkdir -p "$ICON_THEME_DIR/128x128/apps" "$ICON_THEME_DIR/scalable/apps"
+if [ -f "$USER_HOME/Icons/userblade_icon.png" ]; then
+  sudo -u "$USER" cp "$USER_HOME/Icons/userblade_icon.png" "$ICON_THEME_DIR/128x128/apps/userblade.png"
+  sudo -u "$USER" cp "$USER_HOME/Icons/userblade_icon.png" "$ICON_THEME_DIR/scalable/apps/userblade.png"
+fi
+cat <<EOF | sudo -u "$USER" tee "$ICON_THEME_DIR/index.theme" >/dev/null
+[Icon Theme]
+Name=UserBlade
+Comment=UserBlade custom icon theme
+Inherits=Papirus-Dark
+Directories=128x128/apps scalable/apps
+
+[128x128/apps]
+Size=128
+Context=Apps
+Type=Fixed
+
+[scalable/apps]
+Size=48
+Context=Apps
+Type=Scalable
+EOF
+
 # Store URLs for future updates
 echo "$WALLPAPER_URL" > "$USER_HOME/.cache/userblade/wallpaper.url"
 echo "$ICON_URL" > "$USER_HOME/.cache/userblade/icon.url"
 
 # Ensure ownership
-chown -R "$USER":"$USER" "$USER_HOME/Pictures" "$USER_HOME/Icons" "$USER_HOME/.cache/userblade"
+chown -R "$USER":"$USER" "$USER_HOME/Pictures" "$USER_HOME/Icons" "$USER_HOME/.cache/userblade" "$ICON_THEME_DIR"
 
 # Arc-Dark Plasma Theme (GTK + KDE + Kvantum + Plasma 6)
 log "Installing Arc-Dark Plasma theme..."
@@ -243,7 +272,7 @@ ColorScheme=BreezeDark
 WidgetStyle=breeze
 
 [Icons]
-Theme=Papirus-Dark
+Theme=UserBlade
 
 [CursorTheme]
 Name=Breeze_Snow
@@ -350,8 +379,17 @@ cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/plasmarc" >/dev/null
 [General]
 sessions=plasmawayland
 
+[Theme]
+Theme=org.kde.breezedark.desktop
+
 [PlasmaViewer]
 PreviewPlugins=true
+EOF
+
+# Plasma shell theme config for Plasma 6
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/plasmashellrc" >/dev/null
+[Theme]
+Theme=org.kde.breezedark.desktop
 EOF
 
 # Kwinrc for window manager
@@ -403,52 +441,91 @@ fi
 log "Starting layout application..."
 sleep 5
 
-# 1. Apply wallpaper with the supported Plasma 6 tool when present
-if [ -f "$WALLPAPER" ]; then
-  if command -v plasma-apply-wallpaperimage >/dev/null 2>&1; then
-    log "Applying wallpaper with plasma-apply-wallpaperimage"
-    plasma-apply-wallpaperimage "$WALLPAPER" 2>/dev/null || true
+if command -v qdbus-qt6 >/dev/null 2>&1; then
+  QDBUS="qdbus-qt6"
+elif command -v qdbus >/dev/null 2>&1; then
+  QDBUS="qdbus"
+else
+  QDBUS=""
+fi
+
+apply_wallpaper() {
+  if [ -f "$WALLPAPER" ]; then
+    if command -v plasma-apply-wallpaperimage >/dev/null 2>&1; then
+      log "Applying wallpaper with plasma-apply-wallpaperimage"
+      plasma-apply-wallpaperimage "$WALLPAPER" 2>/dev/null || true
+    fi
+
+    if [ -n "$QDBUS" ]; then
+      log "Applying wallpaper via DBus fallback"
+      "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
+        var allDesktops = desktops();
+        for (var i = 0; i < allDesktops.length; i++) {
+          var d = allDesktops[i];
+          d.wallpaperPlugin = 'org.kde.image';
+          d.currentConfigGroup = Array('Wallpaper', 'org.kde.image', 'General');
+          d.writeConfig('Image', 'file://$HOME_DIR/Pictures/userblade_wallpaper.jpg');
+        }
+      " 2>/dev/null || true
+    fi
+  fi
+}
+
+apply_theme() {
+  if command -v kwriteconfig6 >/dev/null 2>&1; then
+    log "Applying theme settings"
+    kwriteconfig6 --file "$HOME_DIR/.config/kdeglobals" --group Icons --key Theme UserBlade 2>/dev/null || true
+    kwriteconfig6 --file "$HOME_DIR/.config/kdeglobals" --group General --key ColorScheme BreezeDark 2>/dev/null || true
+    kwriteconfig6 --file "$HOME_DIR/.config/kdeglobals" --group General --key WidgetStyle breeze 2>/dev/null || true
+    kwriteconfig6 --file "$HOME_DIR/.config/plasmarc" --group Theme --key Theme org.kde.breezedark.desktop 2>/dev/null || true
+    kwriteconfig6 --file "$HOME_DIR/.config/plasmashellrc" --group Theme --key Theme org.kde.breezedark.desktop 2>/dev/null || true
   fi
 
-  if command -v qdbus-qt6 >/dev/null 2>&1; then
-    QDBUS="qdbus-qt6"
-  elif command -v qdbus >/dev/null 2>&1; then
-    QDBUS="qdbus"
-  else
-    QDBUS=""
+  if command -v lookandfeeltool >/dev/null 2>&1; then
+    log "Applying look-and-feel"
+    lookandfeeltool -a org.kde.breezedark.desktop 2>/dev/null || true
+  fi
+
+  if command -v kbuildsycoca5 >/dev/null 2>&1; then
+    log "Rebuilding KDE config cache"
+    kbuildsycoca5 --noincremental >/dev/null 2>&1 || true
+  fi
+}
+
+apply_layout() {
+  if command -v plasma-apply-layout >/dev/null 2>&1 && [ -f "$LAYOUT" ]; then
+    log "Applying Plasma layout template"
+    plasma-apply-layout "$LAYOUT" 2>/dev/null || return 0
   fi
 
   if [ -n "$QDBUS" ]; then
-    log "Applying wallpaper via DBus fallback"
+    log "Applying Plasma layout via DBus fallback"
     "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
-      var allDesktops = desktops();
-      for (var i=0; i<allDesktops.length; i++) {
-        d = allDesktops[i];
-        d.wallpaperPlugin = 'org.kde.image';
-        d.currentConfigGroup = Array('Wallpaper', 'org.kde.image', 'General');
-        d.writeConfig('Image', 'file://$HOME_DIR/Pictures/userblade_wallpaper.jpg');
-      }
+      (function() {
+        var existingPanels = panels();
+        for (var i = existingPanels.length - 1; i >= 0; i--) {
+          existingPanels[i].remove();
+        }
+
+        var top = new Panel;
+        top.location = 'top';
+        top.addWidget('org.kde.plasma.kickoff');
+        top.addWidget('org.kde.plasma.taskmanager');
+        top.addWidget('org.kde.plasma.systemtray');
+        top.addWidget('org.kde.plasma.digitalclock');
+
+        var right = new Panel;
+        right.location = 'right';
+        right.addWidget('org.kde.plasma.taskmanager');
+        right.addWidget('org.kde.plasma.systemtray');
+      })();
     " 2>/dev/null || true
   fi
-fi
+}
 
-# 2. Apply color/icon theme with Plasma 6 tools
-if command -v kwriteconfig6 >/dev/null 2>&1; then
-  log "Applying theme settings"
-  kwriteconfig6 --file "$HOME_DIR/.config/kdeglobals" --group Icons --key Theme Papirus-Dark 2>/dev/null || true
-  kwriteconfig6 --file "$HOME_DIR/.config/kdeglobals" --group General --key ColorScheme BreezeDark 2>/dev/null || true
-fi
-
-if command -v lookandfeeltool >/dev/null 2>&1; then
-  log "Applying look-and-feel"
-  lookandfeeltool -a org.kde.breezedark.desktop 2>/dev/null || true
-fi
-
-# 3. Apply the layout template if the tool exists
-if command -v plasma-apply-layout >/dev/null 2>&1 && [ -f "$LAYOUT" ]; then
-  log "Applying Plasma layout template"
-  plasma-apply-layout "$LAYOUT" 2>/dev/null || true
-fi
+apply_wallpaper
+apply_theme
+apply_layout
 
 # 4. Rebuild icon cache and refresh GTK theme
 log "Rebuilding icon caches"
@@ -487,7 +564,17 @@ Terminal=false
 OnlyShowIn=KDE;
 EOF
 
-chown -R "$USER":"$USER" "$USER_HOME/.local/bin/userblade-apply-layout.sh" "$USER_HOME/.config/autostart"
+# Fallback autostart script folder for KDE Plasma
+sudo -u "$USER" mkdir -p "$USER_HOME/.config/autostart-scripts"
+cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/autostart-scripts/userblade-apply-layout.sh" >/dev/null
+#!/bin/bash
+set -e
+
+"$USER_HOME/.local/bin/userblade-apply-layout.sh"
+EOF
+sudo -u "$USER" chmod +x "$USER_HOME/.config/autostart-scripts/userblade-apply-layout.sh"
+
+chown -R "$USER":"$USER" "$USER_HOME/.local/bin/userblade-apply-layout.sh" "$USER_HOME/.config/autostart" "$USER_HOME/.config/autostart-scripts"
 
 # Fallback service so the style/layout hook runs reliably after login
 sudo -u "$USER" mkdir -p "$USER_HOME/.config/systemd/user"
