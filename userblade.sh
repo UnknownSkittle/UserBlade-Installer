@@ -197,9 +197,9 @@ safe_pacman xorg-server xorg-xinit
 log "Setting up wallpaper + icon..."
 sudo -u "$USER" mkdir -p "$USER_HOME/Pictures" "$USER_HOME/Icons"
 
-# CHANGE THESE TO YOUR DIRECT IMAGE URLs
-WALLPAPER_URL="https://images.unsplash.com/photo-1634690215524-44acc8774664?w=1920&h=1080&fit=crop"
-ICON_URL="https://archlinux.org/static/logos/archlinux-icon-crystal-64.svg"
+# Direct image URLs
+WALLPAPER_URL="https://iili.io/CY0S5dl.jpg"
+ICON_URL="https://iili.io/C7ikyhX.png"
 
 download_image "$WALLPAPER_URL" "$USER_HOME/Pictures/userblade_wallpaper.jpg"
 download_image "$ICON_URL" "$USER_HOME/Icons/userblade_icon.png"
