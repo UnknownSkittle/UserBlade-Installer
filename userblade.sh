@@ -234,7 +234,7 @@ fi
 safe_pacman breeze breeze-gtk
 
 # Create Plasma 6 config structure
-mkdir -p "$USER_HOME/.config"
+sudo -u "$USER" mkdir -p "$USER_HOME/.config"
 
 # KDE Globals for Plasma 6
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/kdeglobals" >/dev/null
@@ -257,7 +257,7 @@ ShowOnStart=false
 EOF
 
 # GTK3 configuration
-mkdir -p "$USER_HOME/.config/gtk-3.0"
+sudo -u "$USER" mkdir -p "$USER_HOME/.config/gtk-3.0"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/gtk-3.0/settings.ini" >/dev/null
 [Settings]
 gtk-theme-name=Arc-Dark
@@ -271,7 +271,7 @@ gtk-xft-hintstyle=hintslight
 EOF
 
 # GTK4 configuration
-mkdir -p "$USER_HOME/.config/gtk-4.0"
+sudo -u "$USER" mkdir -p "$USER_HOME/.config/gtk-4.0"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/gtk-4.0/settings.ini" >/dev/null
 [Settings]
 gtk-theme-name=Arc-Dark
@@ -281,7 +281,7 @@ gtk-application-prefer-dark-theme=1
 EOF
 
 # Kvantum configuration for Arc-Dark
-mkdir -p "$USER_HOME/.config/Kvantum"
+sudo -u "$USER" mkdir -p "$USER_HOME/.config/Kvantum"
 cat <<EOF | sudo -u "$USER" tee "$USER_HOME/.config/Kvantum/kvantum.kvconfig" >/dev/null
 [General]
 theme=Arc-Dark
@@ -297,7 +297,7 @@ chown -R "$USER":"$USER" "$USER_HOME/.config" "$USER_HOME/.local"
 log "Creating Plasma 6 layout: Top panel + Right sidebar..."
 
 LAYOUT_DIR="$USER_HOME/.local/share/plasma/plasmashell/layouts"
-mkdir -p "$LAYOUT_DIR"
+sudo -u "$USER" mkdir -p "$LAYOUT_DIR"
 
 # Create Plasma 6 layout configuration file
 cat <<'LAYOUT_EOF' | sudo -u "$USER" tee "$LAYOUT_DIR/userblade.layout" >/dev/null
@@ -380,7 +380,7 @@ chown -R "$USER":"$USER" "$USER_HOME/.config/kdeglobals" "$USER_HOME/.config/kwi
 
 # Autostart: Apply layout, wallpaper, and theme on login
 log "Creating layout + wallpaper + theme autostart..."
-mkdir -p "$USER_HOME/.local/bin" "$USER_HOME/.config/autostart"
+sudo -u "$USER" mkdir -p "$USER_HOME/.local/bin" "$USER_HOME/.config/autostart"
 
 # Main application script
 cat <<'EOF' | sudo -u "$USER" tee "$USER_HOME/.local/bin/userblade-apply-layout.sh" >/dev/null
