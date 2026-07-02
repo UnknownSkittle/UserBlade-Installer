@@ -96,7 +96,7 @@ pacman -S --noconfirm plasma-desktop plasma-workspace plasma-systemmonitor \
   konsole dolphin systemsettings sddm sddm-kcm xdg-desktop-portal-kde
 
 # ------------------------------------------------------------
-# Apps (no Steam, keep gaming libs)
+# Apps (no Steam)
 # ------------------------------------------------------------
 echo "[UserBlade] Installing apps..."
 pacman -S --noconfirm ghex gimp vlc firefox qbittorrent thunderbird cpu-x
@@ -111,14 +111,18 @@ sudo -u "$USER" yay -S --noconfirm \
   opentabletdriver
 
 # ------------------------------------------------------------
-# Audio stack (PipeWire, full jack2 purge)
+# Audio stack (PipeWire + jack2 kept)
 # ------------------------------------------------------------
-echo "[UserBlade] Installing PipeWire audio stack..."
-pacman -S --noconfirm pipewire pipewire-alsa pipewire-pulse pipewire-jack \
-  wireplumber pavucontrol-qt easyeffects helvum
+echo "[UserBlade] Checking for pipewire-jack conflicts..."
 
-echo "[UserBlade] Removing jack2 and related packages..."
-pacman -Rns --noconfirm jack2 jack2-dbus jack2-tools jack2-libs 2>/dev/null || true
+if pacman -Q pipewire-jack >/dev/null 2>&1; then
+    echo "[UserBlade] Removing pipewire-jack to prevent JACK conflicts..."
+    pacman -Rns --noconfirm pipewire-jack
+fi
+
+echo "[UserBlade] Installing PipeWire audio stack (jack2 retained)..."
+pacman -S --noconfirm pipewire pipewire-alsa pipewire-pulse wireplumber \
+    pavucontrol-qt easyeffects helvum
 
 # ------------------------------------------------------------
 # GPU auto-detect
